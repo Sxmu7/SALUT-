@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { AppShell } from "@/components/layout/AppShell";
 import { TopBar } from "@/components/layout/TopBar";
 import { ChallengeCard } from "@/components/challenges/ChallengeCard";
+import { DiceRoller } from "@/components/challenges/DiceRoller";
 import {
   getEvent,
   getAnyChallenge,
@@ -36,9 +37,13 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
     );
   }
 
-  const challenges = event.challengeIds
+  // event.challengeIds wächst ausschließlich durch Würfeln – hier stehen
+  // also nur Challenges, die die Gruppe in diesem Abend schon aufgedeckt hat.
+  // Der Rest bleibt bewusst verborgen, bis gewürfelt wird.
+  const revealed = event.challengeIds
     .map((cid) => getAnyChallenge(cid))
-    .filter((c): c is NonNullable<typeof c> => Boolean(c));
+    .filter((c): c is NonNullable<typeof c> => Boolean(c))
+    .reverse();
 
   function statusFor(challengeId: string) {
     const sub = submissions.find(
@@ -47,13 +52,13 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
     return sub?.status;
   }
 
-  const doneCount = challenges.filter((c) => statusFor(c.id) === "approved").length;
+  const doneCount = revealed.filter((c) => statusFor(c.id) === "approved").length;
 
   return (
     <AppShell>
       <TopBar
         title={event.title}
-        subtitle={`${event.emoji} ${formatDate(event.eventDate)} · ${doneCount}/${challenges.length} erledigt`}
+        subtitle={`${event.emoji} ${formatDate(event.eventDate)} · ${doneCount} gemeistert`}
       />
 
       <div className="px-5">
@@ -61,43 +66,40 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="rounded-2xl p-4 mb-4 text-center font-semibold"
+            className="rounded-2xl p-4 mb-2 text-center font-semibold"
             style={{ background: "var(--gradient-gold)" }}
           >
-            🎂 Geburtstags-Special mit Extra-Punkten!
+            🎂 Geburtstags-Special – exklusive Challenges im Würfel-Topf!
           </motion.div>
         )}
 
-        <div className="h-2 rounded-full bg-white/8 overflow-hidden mb-5">
-          <motion.div
-            className="h-full"
-            style={{ background: "var(--gradient-party)" }}
-            initial={{ width: 0 }}
-            animate={{
-              width: challenges.length
-                ? `${(doneCount / challenges.length) * 100}%`
-                : "0%",
-            }}
-            transition={{ duration: 0.6 }}
-          />
-        </div>
+        <DiceRoller eventId={event.id} />
 
-        <div className="space-y-3 pb-6">
-          {challenges.map((c, i) => (
-            <Link key={c.id} href={`/events/${event.id}/challenges/${c.id}`}>
-              <ChallengeCard
-                challenge={c}
-                index={i}
-                done={statusFor(c.id) === "approved"}
-              />
-            </Link>
-          ))}
-          {challenges.length === 0 && (
-            <p className="text-muted text-sm text-center py-10">
-              Noch keine Challenges in diesem Event.
+        {revealed.length > 0 && (
+          <div className="mb-2">
+            <p className="text-xs font-semibold text-muted uppercase mb-3">
+              Bisher aufgedeckt
             </p>
-          )}
-        </div>
+            <div className="space-y-3 pb-6">
+              {revealed.map((c, i) => (
+                <Link key={`${c.id}-${i}`} href={`/events/${event.id}/challenges/${c.id}`}>
+                  <ChallengeCard
+                    challenge={c}
+                    index={i}
+                    done={statusFor(c.id) === "approved"}
+                  />
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {revealed.length === 0 && (
+          <p className="text-muted text-sm text-center pb-10">
+            Noch nichts gewürfelt – tippt oben auf den Würfel, um die erste
+            Challenge des Abends aufzudecken.
+          </p>
+        )}
       </div>
     </AppShell>
   );

@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/Card";
 import { Avatar } from "@/components/ui/Avatar";
 import { CountdownFlip } from "@/components/ui/CountdownFlip";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
-import { CATEGORIES } from "@/lib/data/categories";
+import { Button } from "@/components/ui/Button";
 import {
   getCurrentProfile,
   isOnboarded,
@@ -18,6 +18,7 @@ import {
   getNextHighlight,
   computeRanking,
   ensureBirthdayEvents,
+  getOrCreateQuickEvent,
 } from "@/lib/db";
 import { daysUntil } from "@/lib/utils";
 import { Profile, Group, RankingEntry } from "@/types";
@@ -148,35 +149,18 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-display font-bold text-lg">Kategorien</h2>
-            <Link href="/challenges" className="text-sm text-muted">
-              Alle →
-            </Link>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            {CATEGORIES.map((cat, i) => (
-              <Link key={cat.id} href={`/challenges?category=${cat.id}`}>
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: i * 0.04 }}
-                  whileTap={{ scale: 0.94 }}
-                  className="card-surface rounded-2xl p-3 flex flex-col items-center gap-1.5 text-center"
-                >
-                  <div
-                    className="w-10 h-10 rounded-xl flex items-center justify-center text-lg"
-                    style={{ background: cat.gradient }}
-                  >
-                    {cat.icon}
-                  </div>
-                  <span className="text-[11px] font-medium">{cat.name}</span>
-                </motion.div>
-              </Link>
-            ))}
-          </div>
-        </div>
+        {!highlight?.eventId && (
+          <Button
+            fullWidth
+            size="lg"
+            onClick={() => {
+              const event = getOrCreateQuickEvent(group.id);
+              router.push(`/events/${event.id}`);
+            }}
+          >
+            Abend starten 🎲
+          </Button>
+        )}
 
         <Card initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
           <div className="flex items-center justify-between mb-3">

@@ -12,7 +12,9 @@ import {
   listGroupMembers,
   createGroup,
   joinGroupByCode,
+  getNextHighlight,
 } from "@/lib/db";
+import { daysUntil } from "@/lib/utils";
 import { Group } from "@/types";
 
 const GROUP_EMOJIS = ["🎉", "🍻", "🥂", "🎊", "🔥", "🎈"];
@@ -53,11 +55,13 @@ export default function GroupsPage() {
 
   return (
     <AppShell>
-      <TopBar title="Gruppen" subtitle="Deine Crews" />
+      <TopBar title="Freunde" subtitle="Deine Crews" />
 
       <div className="px-5 space-y-3">
         {groups.map((g, i) => {
           const members = listGroupMembers(g.id);
+          const highlight = getNextHighlight(g.id);
+          const days = highlight ? daysUntil(highlight.date.toISOString()) : null;
           return (
             <motion.div
               key={g.id}
@@ -67,7 +71,7 @@ export default function GroupsPage() {
             >
               <Card className="flex items-center gap-3">
                 <div
-                  className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl"
+                  className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0"
                   style={{ background: "var(--gradient-party)" }}
                 >
                   {g.emoji}
@@ -84,6 +88,16 @@ export default function GroupsPage() {
                     Code: <span className="font-mono font-semibold text-foreground">{g.inviteCode}</span>
                   </p>
                 </div>
+                {highlight && (
+                  <div className="text-right shrink-0 pl-2">
+                    <p className="text-[10px] text-muted uppercase font-semibold">
+                      {days === 0 ? "Heute" : `${highlight.emoji}`}
+                    </p>
+                    <p className="text-sm font-bold gradient-text">
+                      {days === 0 ? "🎉" : `${days}T`}
+                    </p>
+                  </div>
+                )}
               </Card>
             </motion.div>
           );

@@ -6,15 +6,15 @@ import {
   GameEvent,
   Submission,
   Challenge,
+  CategoryId,
   RankingEntry,
 } from "@/types";
-import { CHALLENGES, getBirthdayChallengeSet } from "@/lib/data/challenges";
+import { CHALLENGES } from "@/lib/data/challenges";
 import { LS_KEYS, readLS, writeLS } from "@/lib/storage";
 import {
   uid,
   randomInviteCode,
   isTodayBirthday,
-  ageOnNextBirthday,
   AVATAR_EMOJIS,
 } from "@/lib/utils";
 
@@ -226,10 +226,15 @@ export function createEvent(input: {
 
 /**
  * Prüft für alle Gruppen des Nutzers, ob heute jemand Geburtstag hat, und
- * legt automatisch ein Event mit kuratierten Challenges an, falls noch
- * keins für dieses Jahr existiert. Simuliert den täglichen Vercel-Cron-Job
- * (siehe src/app/api/cron/birthdays/route.ts) auch rein clientseitig, damit
- * es im Demo-Modus ohne Server-Cron sofort funktioniert.
+ * startet automatisch einen Abend (Event) dafür, falls noch keiner für
+ * dieses Jahr existiert. Simuliert den täglichen Vercel-Cron-Job (siehe
+ * src/app/api/cron/birthdays/route.ts) auch rein clientseitig, damit es im
+ * Demo-Modus ohne Server-Cron sofort funktioniert.
+ *
+ * Die Challenges selbst werden bewusst NICHT vorab festgelegt – der Abend
+ * startet leer und die Challenges kommen erst per Würfel (Party-Modus)
+ * zum Vorschein. Weil das Event als "birthday" markiert ist, schaltet der
+ * Würfel zusätzlich die exklusiven Geburtstags-Challenges frei.
  */
 export function ensureBirthdayEvents(): GameEvent[] {
   const groups = listGroups();
@@ -247,21 +252,49 @@ export function ensureBirthdayEvents(): GameEvent[] {
           new Date(e.eventDate).getFullYear() === thisYear
       );
       if (existing) continue;
-      const age = ageOnNextBirthday(member.birthday);
-      const set = getBirthdayChallengeSet(age);
       const event = createEvent({
         groupId: group.id,
-        title: `${member.name}s Geburtstags-Party`,
+        title: `${member.name}s Geburtstags-Abend`,
         emoji: "🎂",
         type: "birthday",
         eventDate: new Date().toISOString(),
         birthdayUserId: member.id,
-        challengeIds: set.map((c) => c.id),
+        challengeIds: [],
       });
       created.push(event);
     }
   }
   return created;
+}
+
+/**
+ * Würfel-Logik ("Party-Modus"): wählt zufällig eine noch nicht gespielte
+ * Challenge aus der per Würfelzahl vorgegebenen Kategorie. In Geburtstags-
+ * Events sind zusätzlich die exklusiven Geburtstags-Challenges im Topf.
+ * Ist die Kategorie leer gespielt, wird gruppenweit über alle Kategorien
+ * hinweg ausgewichen, damit ein Abend nie "leer" endet.
+ */
+export function pickChallengeForEvent(
+  eventId: string,
+  categoryId: CategoryId
+): Challenge | null {
+  const event = getEvent(eventId);
+  if (!event) return null;
+  const played = new Set(listSubmissions(eventId).map((s) => s.challengeId));
+  const isBirthday = event.type === "birthday";
+  const eligible = (c: Challenge) =>
+    !played.has(c.id) && (isBirthday || !c.isBirthdayExclusive);
+
+  const inCategory = listAllChallenges().filter(
+    (c) => c.categoryId === categoryId && eligible(c)
+  );
+  if (inCategory.length > 0) {
+    return inCategory[Math.floor(Math.random() * inCategory.length)];
+  }
+
+  const anyLeft = listAllChallenges().filter(eligible);
+  if (anyLeft.length === 0) return null;
+  return anyLeft[Math.floor(Math.random() * anyLeft.length)];
 }
 
 /**

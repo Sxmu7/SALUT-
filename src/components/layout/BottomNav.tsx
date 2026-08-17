@@ -7,9 +7,9 @@ import { cn } from "@/lib/utils";
 
 const TABS = [
   { href: "/dashboard", label: "Home", icon: "🏠" },
-  { href: "/challenges", label: "Challenges", icon: "🎯" },
+  { href: "/challenges", label: "Modi", icon: "🎲" },
   { href: "/ranking", label: "Ranking", icon: "🏆" },
-  { href: "/groups", label: "Gruppen", icon: "👥" },
+  { href: "/groups", label: "Freunde", icon: "👥" },
   { href: "/profile", label: "Profil", icon: "⚙️" },
 ];
 
