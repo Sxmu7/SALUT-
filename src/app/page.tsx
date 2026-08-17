@@ -2,44 +2,23 @@
 
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
-import { StaggerText } from "@/components/ui/StaggerText";
-import { PhoneMockup } from "@/components/landing/PhoneMockup";
-import { Logo } from "@/components/brand/Logo";
+import { Typewriter } from "@/components/ui/Typewriter";
+import { LogoMark } from "@/components/brand/Logo";
 import { isOnboarded } from "@/lib/db";
 
-const FEATURES = [
-  {
-    icon: "🎲",
-    title: "Würfel statt Liste",
-    text: "Challenges kommen überraschend per Würfel – nichts ist vorher sichtbar.",
-  },
-  {
-    icon: "📸",
-    title: "Beweis zählt",
-    text: "Foto oder Video als Nachweis, live von der Crew abgestimmt.",
-  },
-  {
-    icon: "⚡",
-    title: "Punkte wie Kickbase",
-    text: "Fester Punktewert pro Challenge. Sammeln, aufsteigen, gewinnen.",
-  },
-  {
-    icon: "🎂",
-    title: "Geburtstags-Events",
-    text: "Einmal eintragen – Salut! startet automatisch dein Special-Event.",
-  },
-  {
-    icon: "📄",
-    title: "Eigene Challenges",
-    text: "Lade eigene Listen hoch. KI-Modus für neue Challenges folgt bald.",
-  },
+// Kurz, einfach, ohne Vergleiche zu anderen Apps – verständlich für jeden.
+const STEPS = [
+  { icon: "🎲", text: "Würfle deine nächste Challenge" },
+  { icon: "📸", text: "Beweise sie mit Foto oder Video" },
+  { icon: "🏆", text: "Sammle Punkte und gewinne den Abend" },
 ];
 
 export default function LandingPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const [typedDone, setTypedDone] = useState(false);
 
   useEffect(() => {
     setReady(true);
@@ -54,137 +33,65 @@ export default function LandingPage() {
   }
 
   return (
-    <div className="min-h-screen overflow-hidden relative">
-      {/* Ambient gradient blobs */}
-      <div className="pointer-events-none absolute -top-32 -left-32 w-96 h-96 rounded-full opacity-30 blur-3xl" style={{ background: "var(--gradient-party)" }} />
-      <div className="pointer-events-none absolute top-1/3 -right-40 w-96 h-96 rounded-full opacity-20 blur-3xl" style={{ background: "var(--gradient-gold)" }} />
+    <div className="h-[100dvh] overflow-hidden relative flex flex-col safe-top safe-bottom">
+      <div
+        className="pointer-events-none absolute -top-24 -left-24 w-72 h-72 rounded-full opacity-25 blur-3xl"
+        style={{ background: "var(--gradient-party)" }}
+      />
+      <div
+        className="pointer-events-none absolute bottom-0 -right-24 w-72 h-72 rounded-full opacity-20 blur-3xl"
+        style={{ background: "var(--gradient-gold)" }}
+      />
 
-      <div className="relative max-w-md mx-auto px-6 safe-top pt-6">
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={ready ? { opacity: 1, y: 0 } : {}}
-        >
-          {ready && <Logo size={32} />}
-        </motion.div>
+      <div className="relative flex-1 flex flex-col items-center justify-center px-8 text-center">
+        {ready && (
+          <motion.div
+            initial={{ scale: 0.85, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", stiffness: 200, damping: 16 }}
+          >
+            <LogoMark size={60} />
+          </motion.div>
+        )}
 
-        <h1 className="font-display font-extrabold text-[40px] leading-[1.05] tracking-tight mt-9">
-          <StaggerText text="Jede Party." active={ready} delay={0.15} />
-          <br />
-          <StaggerText
-            text="Ein Ranking."
-            active={ready}
-            delay={0.4}
-            className="gradient-text"
-          />
+        <h1 className="font-display font-extrabold text-[52px] tracking-tight mt-5 min-h-[1.15em]">
+          {ready && (
+            <Typewriter
+              text="Salut!"
+              speed={120}
+              startDelay={300}
+              onDone={() => setTypedDone(true)}
+              className="gradient-text"
+            />
+          )}
         </h1>
 
-        <motion.p
-          initial={{ opacity: 0, y: 14 }}
-          animate={ready ? { opacity: 1, y: 0 } : {}}
-          transition={{ delay: 0.75 }}
-          className="text-muted mt-4 text-[15px] leading-relaxed"
-        >
-          Trinkchallenges per Würfel, Foto-/Videobeweis, Live-Abstimmung der
-          Crew und ein Punktesystem wie bei Kickbase – inklusive automatischer
-          Geburtstags-Events.
-        </motion.p>
-
-        <motion.div
-          initial={{ opacity: 0, y: 14 }}
-          animate={ready ? { opacity: 1, y: 0 } : {}}
-          transition={{ delay: 0.85 }}
-          className="mt-7"
-        >
-          <Button size="lg" fullWidth onClick={handleStart}>
-            Jetzt starten 🥂
-          </Button>
-          <p className="text-center text-muted text-xs mt-3">
-            Kostenlos · Optimiert für iPhone · Als App installierbar
-          </p>
-        </motion.div>
-
-        <div className="mt-10">
-          <PhoneMockup />
-        </div>
-
-        <div className="mt-14">
-          <p className="text-muted text-xs font-semibold uppercase tracking-wide px-0.5 mb-3">
-            So funktioniert&apos;s
-          </p>
-          <FeatureCarousel />
-        </div>
-
-        <motion.button
-          initial={{ opacity: 0, y: 16 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          whileTap={{ scale: 0.98 }}
-          onClick={handleStart}
-          className="w-full mt-10 mb-24 rounded-[28px] p-6 text-left relative overflow-hidden"
-          style={{ background: "var(--gradient-party)" }}
-        >
-          <p className="font-display text-xl font-extrabold text-white">
-            Bereit für die nächste Runde?
-          </p>
-          <p className="text-white/80 text-sm mt-1">
-            Crew erstellen & direkt loslegen →
-          </p>
-        </motion.button>
-      </div>
-    </div>
-  );
-}
-
-function FeatureCarousel() {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [active, setActive] = useState(0);
-
-  function handleScroll() {
-    const el = trackRef.current;
-    if (!el || el.children.length === 0) return;
-    const cardWidth = (el.children[0] as HTMLElement).offsetWidth + 12;
-    setActive(Math.round(el.scrollLeft / cardWidth));
-  }
-
-  return (
-    <div>
-      <div
-        ref={trackRef}
-        onScroll={handleScroll}
-        className="flex gap-3 overflow-x-auto snap-x snap-mandatory no-scrollbar -mx-6 px-6 pb-1"
-      >
-        {FEATURES.map((f, i) => (
-          <motion.div
-            key={f.title}
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-20px" }}
-            transition={{ delay: i * 0.04, type: "spring", stiffness: 200, damping: 22 }}
-            className="card-surface rounded-2xl p-5 shrink-0 w-[72%] snap-start"
-          >
-            <div
-              className="w-11 h-11 rounded-2xl flex items-center justify-center text-xl"
-              style={{ background: "var(--gradient-party)" }}
+        <div className="mt-10 space-y-4 w-full max-w-xs">
+          {STEPS.map((step, i) => (
+            <motion.div
+              key={step.text}
+              initial={{ opacity: 0, y: 10 }}
+              animate={typedDone ? { opacity: 1, y: 0 } : {}}
+              transition={{ delay: 0.2 + i * 0.14 }}
+              className="flex items-center gap-3 text-left"
             >
-              {f.icon}
-            </div>
-            <h3 className="font-semibold text-[15px] mt-3">{f.title}</h3>
-            <p className="text-muted text-[13px] mt-1 leading-relaxed">{f.text}</p>
-          </motion.div>
-        ))}
+              <span className="text-xl shrink-0">{step.icon}</span>
+              <span className="text-[15px] text-foreground/90">{step.text}</span>
+            </motion.div>
+          ))}
+        </div>
       </div>
-      <div className="flex gap-1.5 justify-center mt-4">
-        {FEATURES.map((f, i) => (
-          <div
-            key={f.title}
-            className="h-1.5 rounded-full transition-all"
-            style={{
-              width: i === active ? 16 : 6,
-              background: i === active ? "var(--accent)" : "rgba(255,255,255,0.15)",
-            }}
-          />
-        ))}
-      </div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={typedDone ? { opacity: 1, y: 0 } : {}}
+        transition={{ delay: 0.55 }}
+        className="relative px-6 pb-6 shrink-0"
+      >
+        <Button size="lg" fullWidth onClick={handleStart}>
+          Los geht&apos;s 🥂
+        </Button>
+      </motion.div>
     </div>
   );
 }

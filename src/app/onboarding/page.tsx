@@ -36,7 +36,7 @@ const INTRO_SLIDES = [
   },
   {
     icon: "🏆",
-    title: "Punkte wie bei Kickbase.",
+    title: "Punkte sammeln, oben stehen.",
     text: "Jede gemeisterte Challenge bringt feste Punkte. Am Ende eines Abends zählt, wer oben im Ranking steht.",
   },
 ];
