@@ -1,0 +1,279 @@
+"use client";
+
+import { useEffect, useRef, useState, use as usePromise } from "react";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import { AppShell } from "@/components/layout/AppShell";
+import { TopBar } from "@/components/layout/TopBar";
+import { Button } from "@/components/ui/Button";
+import { Avatar } from "@/components/ui/Avatar";
+import { fireConfetti } from "@/components/ui/Confetti";
+import { getCategory } from "@/lib/data/categories";
+import {
+  getAnyChallenge,
+  getEvent,
+  getCurrentProfile,
+  listSubmissionsForUser,
+  submitChallengeProof,
+  listGroupMembers,
+} from "@/lib/db";
+import { Submission } from "@/types";
+
+export default function ChallengePlayPage({
+  params,
+}: {
+  params: Promise<{ id: string; challengeId: string }>;
+}) {
+  const { id, challengeId } = usePromise(params);
+  const router = useRouter();
+  const challenge = getAnyChallenge(challengeId);
+  const event = getEvent(id);
+  const profile = getCurrentProfile();
+  const category = challenge ? getCategory(challenge.categoryId) : null;
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [proofType, setProofType] = useState<"photo" | "video" | null>(null);
+  const [submission, setSubmission] = useState<Submission | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const celebratedRef = useRef(false);
+
+  useEffect(() => {
+    if (!profile || !challenge) return;
+    const existing = listSubmissionsForUser(id, profile.id).find(
+      (s) => s.challengeId === challengeId
+    );
+    if (existing) setSubmission(existing);
+  }, [id, challengeId, profile, challenge]);
+
+  useEffect(() => {
+    if (!submission || submission.status !== "pending") return;
+    const interval = setInterval(() => {
+      if (!profile) return;
+      const updated = listSubmissionsForUser(id, profile.id).find(
+        (s) => s.id === submission.id
+      );
+      if (updated && updated.status !== submission.status) {
+        setSubmission(updated);
+      }
+    }, 800);
+    return () => clearInterval(interval);
+  }, [submission, id, profile]);
+
+  useEffect(() => {
+    if (submission?.status === "approved" && !celebratedRef.current) {
+      celebratedRef.current = true;
+      fireConfetti("big");
+    }
+  }, [submission?.status]);
+
+  if (!challenge || !event) {
+    return (
+      <AppShell>
+        <TopBar title="Nicht gefunden" />
+      </AppShell>
+    );
+  }
+
+  function handleFile(file: File) {
+    const type = file.type.startsWith("video") ? "video" : "photo";
+    setProofType(type);
+    if (type === "photo") {
+      const reader = new FileReader();
+      reader.onload = () => setPreview(reader.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setPreview(URL.createObjectURL(file));
+    }
+  }
+
+  function submit(withoutProof = false) {
+    if (!profile) return;
+    setSubmitting(true);
+    const sub = submitChallengeProof({
+      eventId: id,
+      challengeId,
+      userId: profile.id,
+      proofDataUrl: withoutProof ? undefined : preview ?? undefined,
+      note: withoutProof ? "Ehrenwort" : undefined,
+    });
+    setSubmission(sub);
+    setSubmitting(false);
+    if (sub.status === "approved") fireConfetti("big");
+  }
+
+  const members = listGroupMembers(event.groupId).filter((m) => m.id !== profile?.id);
+
+  return (
+    <AppShell>
+      <TopBar title={challenge.title} subtitle={category?.name} />
+
+      <div className="px-5">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9, rotate: -3 }}
+          animate={{ opacity: 1, scale: 1, rotate: 0 }}
+          transition={{ type: "spring", stiffness: 200, damping: 16 }}
+          className="rounded-[28px] p-8 flex flex-col items-center text-center mb-5"
+          style={{ background: category?.gradient }}
+        >
+          <span className="text-5xl mb-3">{challenge.icon}</span>
+          <p className="text-white/90 text-sm leading-relaxed">{challenge.description}</p>
+          <span className="mt-4 font-display font-extrabold text-3xl text-white">
+            +{challenge.points}
+          </span>
+          <span className="text-white/70 text-xs">Punkte bei Erfolg</span>
+        </motion.div>
+
+        <AnimatePresence mode="wait">
+          {!submission && (
+            <motion.div
+              key="input"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-4"
+            >
+              {challenge.proofType !== "none" ? (
+                <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept={challenge.proofType === "video" ? "video/*" : "image/*"}
+                    capture="environment"
+                    className="hidden"
+                    onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+                  />
+                  {preview ? (
+                    <div className="rounded-2xl overflow-hidden card-surface">
+                      {proofType === "video" ? (
+                        <video src={preview} controls className="w-full max-h-72 object-cover" />
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={preview} alt="Beweis" className="w-full max-h-72 object-cover" />
+                      )}
+                    </div>
+                  ) : (
+                    <motion.button
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full card-surface rounded-2xl py-10 flex flex-col items-center gap-2 border-2 border-dashed border-white/15"
+                    >
+                      <span className="text-3xl">
+                        {challenge.proofType === "video" ? "🎥" : "📸"}
+                      </span>
+                      <span className="text-sm font-semibold">
+                        {challenge.proofType === "video" ? "Video aufnehmen" : "Foto aufnehmen"}
+                      </span>
+                      <span className="text-muted text-xs">Tippen zum Aufnehmen/Auswählen</span>
+                    </motion.button>
+                  )}
+
+                  <Button
+                    fullWidth
+                    size="lg"
+                    disabled={!preview || submitting}
+                    onClick={() => submit(false)}
+                  >
+                    Beweis einreichen 🚀
+                  </Button>
+                  {preview && (
+                    <button
+                      onClick={() => {
+                        setPreview(null);
+                        setProofType(null);
+                      }}
+                      className="w-full text-center text-muted text-sm"
+                    >
+                      Neu aufnehmen
+                    </button>
+                  )}
+                </>
+              ) : (
+                <Button fullWidth size="lg" disabled={submitting} onClick={() => submit(true)}>
+                  Erledigt – auf Ehrenwort ✅
+                </Button>
+              )}
+            </motion.div>
+          )}
+
+          {submission && (
+            <motion.div
+              key="status"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-4"
+            >
+              {submission.status === "pending" && (
+                <div className="card-surface rounded-2xl p-5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <motion.span
+                      animate={{ rotate: 360 }}
+                      transition={{ repeat: Infinity, duration: 1.2, ease: "linear" }}
+                      className="text-lg"
+                    >
+                      🗳️
+                    </motion.span>
+                    <p className="font-semibold text-sm">Lokale Abstimmung läuft…</p>
+                  </div>
+                  <div className="space-y-2">
+                    {members.map((m) => {
+                      const vote = submission.votes.find((v) => v.voterId === m.id);
+                      return (
+                        <div key={m.id} className="flex items-center gap-2">
+                          <Avatar emoji={m.avatarEmoji} size="sm" />
+                          <span className="text-sm flex-1">{m.name}</span>
+                          {!vote && (
+                            <span className="text-muted text-xs animate-pulse">
+                              wartet…
+                            </span>
+                          )}
+                          {vote && (
+                            <motion.span
+                              initial={{ scale: 0 }}
+                              animate={{ scale: 1 }}
+                              className="text-lg"
+                            >
+                              {vote.approve ? "✅" : "❌"}
+                            </motion.span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {submission.status === "approved" && (
+                <motion.div
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: "spring", stiffness: 260, damping: 16 }}
+                  className="rounded-2xl p-6 text-center"
+                  style={{ background: "var(--gradient-party)" }}
+                >
+                  <span className="text-4xl">🎉</span>
+                  <p className="font-display font-extrabold text-xl mt-2 text-white">
+                    Challenge bestanden!
+                  </p>
+                  <p className="text-white/90 mt-1">+{submission.pointsAwarded} Punkte</p>
+                </motion.div>
+              )}
+
+              {submission.status === "rejected" && (
+                <div className="rounded-2xl p-6 text-center bg-[#FF453A]/15 border border-[#FF453A]/30">
+                  <span className="text-4xl">😅</span>
+                  <p className="font-semibold mt-2">Von der Gruppe abgelehnt</p>
+                  <p className="text-muted text-sm mt-1">Kein Problem, nächste Challenge!</p>
+                </div>
+              )}
+
+              <Button fullWidth variant="secondary" onClick={() => router.push(`/events/${id}`)}>
+                Zurück zum Event
+              </Button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </AppShell>
+  );
+}
