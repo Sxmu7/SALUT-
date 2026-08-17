@@ -6,6 +6,20 @@
       <stop offset="100%" stop-color="#64D2FF"/>
     </linearGradient>
   </defs>
-  <rect width="100" height="100" rx="22" fill="url(#g)"/>
-  <text x="50" y="66" font-family="Arial, sans-serif" font-weight="800" font-size="46" fill="white" text-anchor="middle">S!</text>
+  <rect width="100" height="100" rx="24" fill="url(#g)"/>
+  <g transform="translate(50 62)">
+    <g transform="translate(-18 -2) rotate(-16)">
+      <path d="M -14 0 L 14 0 L 2 34 L -2 34 Z" fill="white" fill-opacity="0.96"/>
+      <circle cx="-4" cy="10" r="1.6" fill="white" fill-opacity="0.5"/>
+      <circle cx="3" cy="16" r="1.1" fill="white" fill-opacity="0.4"/>
+      <path d="M -1.6 34 L 1.6 34 L 1.6 50 L 9 57 L -9 57 L -1.6 50 Z" fill="white" fill-opacity="0.96"/>
+    </g>
+    <g transform="translate(18 -2) rotate(16)">
+      <path d="M -14 0 L 14 0 L 2 34 L -2 34 Z" fill="white" fill-opacity="0.96"/>
+      <circle cx="-4" cy="10" r="1.6" fill="white" fill-opacity="0.5"/>
+      <circle cx="3" cy="16" r="1.1" fill="white" fill-opacity="0.4"/>
+      <path d="M -1.6 34 L 1.6 34 L 1.6 50 L 9 57 L -9 57 L -1.6 50 Z" fill="white" fill-opacity="0.96"/>
+    </g>
+    <circle cx="0" cy="-14" r="3.6" fill="white"/>
+  </g>
 </svg>

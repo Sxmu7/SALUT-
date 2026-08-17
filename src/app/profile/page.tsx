@@ -7,40 +7,34 @@ import { TopBar } from "@/components/layout/TopBar";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
-import { getCurrentProfile, createOrUpdateProfile, computeRanking, listGroups } from "@/lib/db";
+import { useProfile } from "@/hooks/useProfile";
+import { usePrimaryGroup } from "@/hooks/useGroups";
+import { useRanking } from "@/hooks/useRanking";
 import { AVATAR_EMOJIS, ageOnNextBirthday } from "@/lib/utils";
-import { Profile } from "@/types";
 
 export default function ProfilePage() {
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const { profile, ready, updateProfile } = useProfile();
+  const { group } = usePrimaryGroup();
+  const { ranking } = useRanking(group?.id);
   const [name, setName] = useState("");
   const [birthday, setBirthday] = useState("");
   const [saved, setSaved] = useState(false);
-  const [stats, setStats] = useState({ points: 0, rank: 0, completed: 0 });
 
   useEffect(() => {
-    const p = getCurrentProfile();
-    setProfile(p);
-    if (p) {
-      setName(p.name);
-      setBirthday(p.birthday ?? "");
-      const groups = listGroups();
-      if (groups[0]) {
-        const ranking = computeRanking(groups[0].id);
-        const me = ranking.find((r) => r.userId === p.id);
-        if (me) setStats({ points: me.points, rank: me.rank, completed: me.challengesCompleted });
-      }
-    }
-  }, []);
+    if (!profile) return;
+    setName(profile.name);
+    setBirthday(profile.birthday ?? "");
+  }, [profile]);
+
+  const me = ranking.find((r) => r.userId === profile?.id);
 
   function save() {
-    const updated = createOrUpdateProfile({ name, birthday: birthday || null });
-    setProfile(updated);
+    updateProfile({ name, birthday: birthday || null });
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
   }
 
-  if (!profile) return null;
+  if (!ready || !profile) return null;
 
   return (
     <AppShell>
@@ -54,7 +48,7 @@ export default function ProfilePage() {
               <motion.button
                 key={e}
                 whileTap={{ scale: 0.85 }}
-                onClick={() => setProfile(createOrUpdateProfile({ avatarEmoji: e }))}
+                onClick={() => updateProfile({ avatarEmoji: e })}
                 className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm ${
                   profile.avatarEmoji === e ? "ring-2 ring-[#BF5AF2]" : "bg-white/5"
                 }`}
@@ -67,15 +61,17 @@ export default function ProfilePage() {
 
         <div className="grid grid-cols-3 gap-3">
           <Card className="text-center py-4">
-            <p className="font-display font-extrabold text-xl">{stats.points}</p>
+            <p className="font-display font-extrabold text-xl">{me?.points ?? 0}</p>
             <p className="text-muted text-[11px] mt-0.5">Punkte</p>
           </Card>
           <Card className="text-center py-4">
-            <p className="font-display font-extrabold text-xl gradient-text">#{stats.rank || "–"}</p>
+            <p className="font-display font-extrabold text-xl gradient-text">
+              #{me?.rank ?? "–"}
+            </p>
             <p className="text-muted text-[11px] mt-0.5">Rang</p>
           </Card>
           <Card className="text-center py-4">
-            <p className="font-display font-extrabold text-xl">{stats.completed}</p>
+            <p className="font-display font-extrabold text-xl">{me?.challengesCompleted ?? 0}</p>
             <p className="text-muted text-[11px] mt-0.5">Challenges</p>
           </Card>
         </div>
@@ -100,7 +96,7 @@ export default function ProfilePage() {
           {birthday && (
             <p className="text-muted text-xs mt-2">
               🎂 In {ageOnNextBirthday(birthday)} Jahren wird automatisch dein
-              Geburtstags-Event erstellt.
+              Geburtstags-Abend gestartet.
             </p>
           )}
         </Card>

@@ -5,17 +5,34 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
+import { LogoMark } from "@/components/brand/Logo";
 import { createOrUpdateProfile } from "@/lib/db";
 import { AVATAR_EMOJIS } from "@/lib/utils";
 
-const TOTAL_STEPS = 5;
-const INTRO_STEPS = 2;
+const INTRO_STEPS = 5;
+const PROFILE_STEPS = 3;
+const TOTAL_STEPS = INTRO_STEPS + PROFILE_STEPS;
 
 const INTRO_SLIDES = [
+  {
+    icon: "logo" as const,
+    title: "Willkommen bei Salut!",
+    text: "Die kurze Anleitung, bevor es losgeht – dauert eine Minute.",
+  },
   {
     icon: "🎲",
     title: "Nicht durchblättern. Würfeln.",
     text: "Challenges siehst du vorher nicht als Liste. Sie kommen per Würfel – überraschend, jeder Abend anders.",
+  },
+  {
+    icon: "📸",
+    title: "Beweis statt Ehrenwort.",
+    text: "Nach jeder Challenge lädst du ein Foto oder Video hoch – oder gibst dein Ehrenwort, wenn kein Beweis nötig ist.",
+  },
+  {
+    icon: "🗳️",
+    title: "Deine Crew stimmt ab.",
+    text: "Jeder Beweis geht live an die Gruppe. Zählbar wird eine Challenge erst, wenn eure Abstimmung sie bestätigt.",
   },
   {
     icon: "🏆",
@@ -31,8 +48,12 @@ export default function OnboardingPage() {
   const [emoji, setEmoji] = useState(AVATAR_EMOJIS[0]);
   const [birthday, setBirthday] = useState("");
 
+  const nameStep = INTRO_STEPS;
+  const avatarStep = INTRO_STEPS + 1;
+  const birthdayStep = INTRO_STEPS + 2;
+
   function next() {
-    if (step === INTRO_STEPS && !name.trim()) return;
+    if (step === nameStep && !name.trim()) return;
     if (step < TOTAL_STEPS - 1) setStep(step + 1);
     else finish();
   }
@@ -74,15 +95,11 @@ export default function OnboardingPage() {
       </div>
 
       <AnimatePresence mode="wait">
-        {step === 0 && (
-          <IntroSlide key="intro0" slide={INTRO_SLIDES[0]} />
+        {isIntro && (
+          <IntroSlide key={`intro${step}`} slide={INTRO_SLIDES[step]} />
         )}
 
-        {step === 1 && (
-          <IntroSlide key="intro1" slide={INTRO_SLIDES[1]} />
-        )}
-
-        {step === 2 && (
+        {step === nameStep && (
           <motion.div
             key="step-name"
             initial={{ opacity: 0, x: 30 }}
@@ -104,7 +121,7 @@ export default function OnboardingPage() {
           </motion.div>
         )}
 
-        {step === 3 && (
+        {step === avatarStep && (
           <motion.div
             key="step-avatar"
             initial={{ opacity: 0, x: 30 }}
@@ -133,7 +150,7 @@ export default function OnboardingPage() {
           </motion.div>
         )}
 
-        {step === 4 && (
+        {step === birthdayStep && (
           <motion.div
             key="step-birthday"
             initial={{ opacity: 0, x: 30 }}
@@ -172,7 +189,11 @@ export default function OnboardingPage() {
   );
 }
 
-function IntroSlide({ slide }: { slide: { icon: string; title: string; text: string } }) {
+function IntroSlide({
+  slide,
+}: {
+  slide: { icon: string | "logo"; title: string; text: string };
+}) {
   return (
     <motion.div
       initial={{ opacity: 0, x: 30 }}
@@ -180,20 +201,34 @@ function IntroSlide({ slide }: { slide: { icon: string; title: string; text: str
       exit={{ opacity: 0, x: -30 }}
       className="flex flex-col items-center text-center py-6"
     >
-      <motion.div
-        initial={{ scale: 0.7, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ type: "spring", stiffness: 200, damping: 14, delay: 0.1 }}
-        className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl card-surface"
+      {slide.icon === "logo" ? (
+        <LogoMark size={80} />
+      ) : (
+        <motion.div
+          initial={{ scale: 0.7, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 200, damping: 14, delay: 0.1 }}
+          className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl card-surface"
+        >
+          {slide.icon}
+        </motion.div>
+      )}
+      <motion.h1
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.18 }}
+        className="font-display text-2xl font-extrabold mt-7 max-w-[280px]"
       >
-        {slide.icon}
-      </motion.div>
-      <h1 className="font-display text-2xl font-extrabold mt-7 max-w-[280px]">
         {slide.title}
-      </h1>
-      <p className="text-muted mt-3 text-[15px] leading-relaxed max-w-[280px]">
+      </motion.h1>
+      <motion.p
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.26 }}
+        className="text-muted mt-3 text-[15px] leading-relaxed max-w-[280px]"
+      >
         {slide.text}
-      </p>
+      </motion.p>
     </motion.div>
   );
 }

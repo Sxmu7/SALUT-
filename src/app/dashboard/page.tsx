@@ -8,51 +8,38 @@ import { AppShell } from "@/components/layout/AppShell";
 import { TopBar } from "@/components/layout/TopBar";
 import { Card } from "@/components/ui/Card";
 import { Avatar } from "@/components/ui/Avatar";
+import { Button } from "@/components/ui/Button";
 import { CountdownFlip } from "@/components/ui/CountdownFlip";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
-import { Button } from "@/components/ui/Button";
-import {
-  getCurrentProfile,
-  isOnboarded,
-  listGroups,
-  getNextHighlight,
-  computeRanking,
-  ensureBirthdayEvents,
-  getOrCreateQuickEvent,
-} from "@/lib/db";
+import { useProfile } from "@/hooks/useProfile";
+import { usePrimaryGroup } from "@/hooks/useGroups";
+import { useRanking, useNextHighlight } from "@/hooks/useRanking";
+import { ensureBirthdayEvents, getOrCreateQuickEvent } from "@/lib/db";
 import { daysUntil } from "@/lib/utils";
-import { Profile, Group, RankingEntry } from "@/types";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [group, setGroup] = useState<Group | null>(null);
-  const [highlight, setHighlight] = useState<ReturnType<typeof getNextHighlight>>(null);
-  const [ranking, setRanking] = useState<RankingEntry[]>([]);
+  const { profile, ready: profileReady, onboarded } = useProfile();
+  const { group, ready: groupReady } = usePrimaryGroup();
+  const { ranking } = useRanking(group?.id);
+  const { highlight } = useNextHighlight(group?.id);
   const [birthdayToday, setBirthdayToday] = useState(false);
 
   useEffect(() => {
-    if (!isOnboarded()) {
+    if (profileReady && !onboarded) {
       router.replace("/onboarding");
-      return;
     }
-    const p = getCurrentProfile();
-    setProfile(p);
+  }, [profileReady, onboarded, router]);
 
+  useEffect(() => {
+    if (!profile) return;
     const created = ensureBirthdayEvents();
-    const groups = listGroups();
-    const g = groups[0] ?? null;
-    setGroup(g);
-    if (g) {
-      setHighlight(getNextHighlight(g.id));
-      setRanking(computeRanking(g.id));
-    }
-    if (p && created.some((e) => e.birthdayUserId === p.id)) {
+    if (created.some((e) => e.birthdayUserId === profile.id)) {
       setBirthdayToday(true);
     }
-  }, [router]);
+  }, [profile]);
 
-  if (!profile || !group) {
+  if (!profileReady || !groupReady || !profile || !group) {
     return (
       <AppShell>
         <div className="p-6 text-muted">Lädt…</div>
@@ -80,7 +67,7 @@ export default function DashboardPage() {
             className="rounded-2xl p-4 text-center font-semibold"
             style={{ background: "var(--gradient-gold)" }}
           >
-            🎉 Alles Gute zum Geburtstag! Dein Special-Event ist bereit.
+            🎉 Alles Gute zum Geburtstag! Dein Special-Abend ist bereit.
           </motion.div>
         )}
 

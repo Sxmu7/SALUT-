@@ -1,25 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { AppShell } from "@/components/layout/AppShell";
 import { TopBar } from "@/components/layout/TopBar";
 import { LeaderboardRow } from "@/components/ranking/LeaderboardRow";
 import { Avatar } from "@/components/ui/Avatar";
-import { computeRanking, listGroups, getCurrentProfile } from "@/lib/db";
-import { RankingEntry, Group } from "@/types";
+import { useProfile } from "@/hooks/useProfile";
+import { usePrimaryGroup } from "@/hooks/useGroups";
+import { useRanking } from "@/hooks/useRanking";
 
 export default function RankingPage() {
-  const [group, setGroup] = useState<Group | null>(null);
-  const [ranking, setRanking] = useState<RankingEntry[]>([]);
-  const profile = getCurrentProfile();
-
-  useEffect(() => {
-    const groups = listGroups();
-    const g = groups[0] ?? null;
-    setGroup(g);
-    if (g) setRanking(computeRanking(g.id));
-  }, []);
+  const { profile } = useProfile();
+  const { group } = usePrimaryGroup();
+  const { ranking } = useRanking(group?.id);
 
   const podium = ranking.slice(0, 3);
   const rest = ranking.slice(3);

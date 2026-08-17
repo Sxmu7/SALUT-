@@ -1,32 +1,21 @@
 "use client";
 
-import { useEffect, useState, use as usePromise } from "react";
+import { use as usePromise } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { AppShell } from "@/components/layout/AppShell";
 import { TopBar } from "@/components/layout/TopBar";
 import { ChallengeCard } from "@/components/challenges/ChallengeCard";
 import { DiceRoller } from "@/components/challenges/DiceRoller";
-import {
-  getEvent,
-  getAnyChallenge,
-  listSubmissions,
-  getCurrentProfile,
-} from "@/lib/db";
-import { GameEvent, Submission } from "@/types";
+import { useEvent } from "@/hooks/useEvent";
+import { useProfile } from "@/hooks/useProfile";
+import { getAnyChallenge } from "@/lib/db";
 import { formatDate } from "@/lib/utils";
 
 export default function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = usePromise(params);
-  const [event, setEvent] = useState<GameEvent | null | undefined>(undefined);
-  const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const userId = getCurrentProfile()?.id;
-
-  useEffect(() => {
-    const e = getEvent(id);
-    setEvent(e ?? null);
-    if (e) setSubmissions(listSubmissions(e.id));
-  }, [id]);
+  const { event, submissions } = useEvent(id);
+  const { profile } = useProfile();
 
   if (event === undefined) return null;
   if (event === null) {
@@ -47,7 +36,7 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
 
   function statusFor(challengeId: string) {
     const sub = submissions.find(
-      (s) => s.challengeId === challengeId && s.userId === userId
+      (s) => s.challengeId === challengeId && s.userId === profile?.id
     );
     return sub?.status;
   }

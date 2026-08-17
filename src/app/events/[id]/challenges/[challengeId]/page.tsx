@@ -9,15 +9,9 @@ import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
 import { fireConfetti } from "@/components/ui/Confetti";
 import { getCategory } from "@/lib/data/categories";
-import {
-  getAnyChallenge,
-  getEvent,
-  getCurrentProfile,
-  listSubmissionsForUser,
-  submitChallengeProof,
-  listGroupMembers,
-} from "@/lib/db";
-import { Submission } from "@/types";
+import { useProfile } from "@/hooks/useProfile";
+import { useEventChallenge } from "@/hooks/useEvent";
+import { submitChallengeProof, listSubmissionsForUser, listGroupMembers } from "@/lib/db";
 
 export default function ChallengePlayPage({
   params,
@@ -26,30 +20,23 @@ export default function ChallengePlayPage({
 }) {
   const { id, challengeId } = usePromise(params);
   const router = useRouter();
-  const challenge = getAnyChallenge(challengeId);
-  const event = getEvent(id);
-  const profile = getCurrentProfile();
+  const { profile } = useProfile();
+  const { event, challenge, submission, setSubmission } = useEventChallenge(
+    id,
+    challengeId,
+    profile?.id
+  );
   const category = challenge ? getCategory(challenge.categoryId) : null;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [proofType, setProofType] = useState<"photo" | "video" | null>(null);
-  const [submission, setSubmission] = useState<Submission | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const celebratedRef = useRef(false);
 
   useEffect(() => {
-    if (!profile || !challenge) return;
-    const existing = listSubmissionsForUser(id, profile.id).find(
-      (s) => s.challengeId === challengeId
-    );
-    if (existing) setSubmission(existing);
-  }, [id, challengeId, profile, challenge]);
-
-  useEffect(() => {
-    if (!submission || submission.status !== "pending") return;
+    if (!submission || submission.status !== "pending" || !profile) return;
     const interval = setInterval(() => {
-      if (!profile) return;
       const updated = listSubmissionsForUser(id, profile.id).find(
         (s) => s.id === submission.id
       );
@@ -58,7 +45,7 @@ export default function ChallengePlayPage({
       }
     }, 800);
     return () => clearInterval(interval);
-  }, [submission, id, profile]);
+  }, [submission, id, profile, setSubmission]);
 
   useEffect(() => {
     if (submission?.status === "approved" && !celebratedRef.current) {
@@ -67,6 +54,7 @@ export default function ChallengePlayPage({
     }
   }, [submission?.status]);
 
+  if (challenge === undefined || event === undefined) return null;
   if (!challenge || !event) {
     return (
       <AppShell>
@@ -102,7 +90,9 @@ export default function ChallengePlayPage({
     if (sub.status === "approved") fireConfetti("big");
   }
 
-  const members = listGroupMembers(event.groupId).filter((m) => m.id !== profile?.id);
+  const members = event
+    ? listGroupMembers(event.groupId).filter((m) => m.id !== profile?.id)
+    : [];
 
   return (
     <AppShell>
