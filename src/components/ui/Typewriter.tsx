@@ -13,6 +13,7 @@ export function Typewriter({
   speed = 90,
   startDelay = 200,
   cursor = true,
+  reduced = false,
   className,
   onDone,
 }: {
@@ -20,6 +21,8 @@ export function Typewriter({
   speed?: number;
   startDelay?: number;
   cursor?: boolean;
+  /** Skips the letter-by-letter animation (prefers-reduced-motion). */
+  reduced?: boolean;
   className?: string;
   onDone?: () => void;
 }) {
@@ -28,6 +31,13 @@ export function Typewriter({
   const [done, setDone] = useState(false);
 
   useEffect(() => {
+    if (reduced) {
+      setCount(text.length);
+      setDone(true);
+      onDone?.();
+      return;
+    }
+
     let charIndex = 0;
     let typeInterval: ReturnType<typeof setInterval> | undefined;
 
@@ -50,7 +60,7 @@ export function Typewriter({
     // onDone intentionally excluded: it's a fire-once callback, not a value
     // this effect should re-run for.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, speed, startDelay]);
+  }, [text, speed, startDelay, reduced]);
 
   useEffect(() => {
     if (!cursor) return;
