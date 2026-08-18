@@ -486,6 +486,14 @@ begin
     return v_submission;
   end if;
 
+  -- Niemand stimmt über die eigene Einreichung ab (die UI zeigt dafür gar
+  -- keine Buttons an, aber ohne diese serverseitige Prüfung könnte ein
+  -- direkter RPC-Aufruf das umgehen und die eigene Abstimmung
+  -- manipulieren).
+  if auth.uid() = v_submission.user_id then
+    raise exception 'cannot_vote_on_own_submission';
+  end if;
+
   insert into votes (submission_id, voter_id, approve)
   values (p_submission_id, auth.uid(), p_approve)
   on conflict (submission_id, voter_id) do update set approve = excluded.approve;
@@ -496,11 +504,16 @@ begin
     where group_id = v_group_id and user_id <> v_submission.user_id;
   v_quorum := greatest(1, ceil(v_total_voters / 2.0));
 
+  -- user_id <> v_submission.user_id ist eigentlich durch die Prüfung oben
+  -- schon ausgeschlossen, bleibt hier aber als zweite, unabhängige
+  -- Absicherung stehen (defense in depth) – falls doch mal eine
+  -- Selbst-Stimme in der Tabelle landet (z.B. aus einer älteren Version
+  -- vor diesem Fix), zählt sie hier trotzdem nicht mit.
   select
     count(*) filter (where approve),
     count(*) filter (where not approve)
     into v_approvals, v_rejections
-    from votes where submission_id = p_submission_id;
+    from votes where submission_id = p_submission_id and voter_id <> v_submission.user_id;
 
   if v_approvals >= v_quorum then
     select points into v_points from challenges where id = v_submission.challenge_id;

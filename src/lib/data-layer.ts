@@ -173,6 +173,16 @@ export async function submitChallengeProof(input: {
   return isRemoteMode() ? remote.submitChallengeProof(input) : local.submitChallengeProof(input);
 }
 
+/** Challenge bewusst ablehnen statt einreichen (siehe queries.ts/db.ts) –
+ * legt direkt eine "rejected"-Submission ohne Abstimmung an. */
+export async function declineChallenge(input: {
+  eventId: string;
+  challengeId: string;
+  userId: string;
+}): Promise<Submission> {
+  return isRemoteMode() ? remote.declineChallenge(input) : local.declineChallenge(input);
+}
+
 export async function castVote(
   submissionId: string,
   voterId: string,
@@ -198,6 +208,17 @@ export function subscribeToSubmission(
 ): () => void {
   if (!isRemoteMode()) return () => {};
   return remote.subscribeToSubmission(submissionId, onChange);
+}
+
+/** Live-Updates für alle Submissions eines Events (neue Einreichungen +
+ * Stimmen) – im Demo-Modus No-Op, da dort ohnehin nur Bots mitstimmen
+ * (kein zweites echtes Gerät, das live etwas einreichen könnte). */
+export function subscribeToEventSubmissions(
+  eventId: string,
+  onChange: (submissions: Submission[]) => void
+): () => void {
+  if (!isRemoteMode()) return () => {};
+  return remote.subscribeToEventSubmissions(eventId, onChange);
 }
 
 // ---------------------------- Party-Push (Party-Modus) ----------------------------

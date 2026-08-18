@@ -14,6 +14,7 @@ import { useProfile } from "@/hooks/useProfile";
 import { useEventChallenge } from "@/hooks/useEvent";
 import {
   submitChallengeProof,
+  declineChallenge,
   listSubmissionsForUser,
   listGroupMembers,
   isRemoteMode,
@@ -40,6 +41,7 @@ export default function ChallengePlayPage({
   const [proofType, setProofType] = useState<"photo" | "video" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [declining, setDeclining] = useState(false);
   const [members, setMembers] = useState<Profile[]>([]);
   const celebratedRef = useRef(false);
 
@@ -136,6 +138,38 @@ export default function ChallengePlayPage({
     }
   }
 
+  async function decline() {
+    if (!profile) return;
+    if (!window.confirm("Diese Challenge wirklich ablehnen? Du bekommst dafür keine Punkte.")) {
+      return;
+    }
+    setDeclining(true);
+    setSubmitError(null);
+    try {
+      const sub = await declineChallenge({ eventId: id, challengeId, userId: profile.id });
+      setSubmission(sub);
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error ? err.message : "Ablehnen fehlgeschlagen. Bitte erneut versuchen."
+      );
+    } finally {
+      setDeclining(false);
+    }
+  }
+
+  // "Nacheinreichung": nach einer Ablehnung (durch die Gruppe oder durch
+  // dich selbst) zurück zur Eingabe-Ansicht, damit ein neuer Versuch
+  // möglich ist. Es gibt bewusst keine Unique-Constraint auf
+  // (event_id, challenge_id, user_id) – submit() legt dann einfach eine
+  // neue Submission an, die "alte" abgelehnte bleibt als Historie stehen.
+  function retry() {
+    setSubmission(null);
+    setPreview(null);
+    setProofType(null);
+    setSubmitError(null);
+    celebratedRef.current = false;
+  }
+
   return (
     <AppShell>
       <TopBar title={challenge.title} subtitle={category?.name} />
@@ -226,6 +260,14 @@ export default function ChallengePlayPage({
                 </Button>
               )}
 
+              <button
+                onClick={decline}
+                disabled={declining || submitting}
+                className="w-full text-center text-muted text-sm disabled:opacity-40"
+              >
+                {declining ? "Wird abgelehnt…" : "Challenge ablehnen ❌"}
+              </button>
+
               {submitError && (
                 <p className="text-[#FF453A] text-xs text-center">{submitError}</p>
               )}
@@ -298,9 +340,23 @@ export default function ChallengePlayPage({
               {submission.status === "rejected" && (
                 <div className="rounded-2xl p-6 text-center bg-[#FF453A]/15 border border-[#FF453A]/30">
                   <span className="text-4xl">😅</span>
-                  <p className="font-semibold mt-2">Von der Gruppe abgelehnt</p>
-                  <p className="text-muted text-sm mt-1">Kein Problem, nächste Challenge!</p>
+                  <p className="font-semibold mt-2">
+                    {submission.note === "declined_by_user"
+                      ? "Von dir abgelehnt"
+                      : "Von der Gruppe abgelehnt"}
+                  </p>
+                  <p className="text-muted text-sm mt-1">
+                    {submission.note === "declined_by_user"
+                      ? "Kein Problem – du kannst es dir aber auch nochmal überlegen."
+                      : "Kein Problem, du kannst es nochmal versuchen oder weiterziehen."}
+                  </p>
                 </div>
+              )}
+
+              {submission.status === "rejected" && (
+                <Button fullWidth size="lg" onClick={retry}>
+                  Nochmal versuchen 🔁
+                </Button>
               )}
 
               <Button fullWidth variant="secondary" onClick={() => router.push(`/events/${id}`)}>

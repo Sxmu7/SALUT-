@@ -472,6 +472,32 @@ export function submitChallengeProof(input: {
   return submission;
 }
 
+/** Lokales Gegenstück zu queries.ts' declineChallenge() – siehe dort für
+ * die Begründung (kein Beweis, direkt "rejected", note zur Unterscheidung
+ * von einer Gruppen-Ablehnung). */
+export function declineChallenge(input: {
+  eventId: string;
+  challengeId: string;
+  userId: string;
+}): Submission {
+  const challenge = getAnyChallenge(input.challengeId);
+  const all = readLS<Submission[]>(LS_KEYS.submissions, []);
+  const submission: Submission = {
+    id: uid("sub"),
+    eventId: input.eventId,
+    challengeId: input.challengeId,
+    userId: input.userId,
+    proofType: challenge?.proofType ?? "none",
+    note: "declined_by_user",
+    status: "rejected",
+    pointsAwarded: 0,
+    votes: [],
+    createdAt: new Date().toISOString(),
+  };
+  saveAllSubmissions([...all, submission]);
+  return submission;
+}
+
 function simulateBotVotes(submissionId: string) {
   const event = (() => {
     const s = readLS<Submission[]>(LS_KEYS.submissions, []).find((x) => x.id === submissionId);

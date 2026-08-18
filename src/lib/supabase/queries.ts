@@ -656,6 +656,39 @@ export async function submitChallengeProof(input: {
   return mapSubmissionRow(data);
 }
 
+/**
+ * Eine Challenge bewusst ablehnen, statt einen Beweis einzureichen – legt
+ * direkt eine Submission mit status "rejected" an (kein Beweis, keine
+ * Abstimmung nötig). Der `note`-Wert "declined_by_user" unterscheidet das
+ * in der UI von einer durch die Gruppen-Abstimmung abgelehnten Submission
+ * (siehe events/[id]/challenges/[challengeId]/page.tsx). Erneutes Würfeln/
+ * Einreichen bleibt danach möglich – es gibt bewusst keine Unique-
+ * Constraint auf (event_id, challenge_id, user_id).
+ */
+export async function declineChallenge(input: {
+  eventId: string;
+  challengeId: string;
+  userId: string;
+}): Promise<Submission> {
+  const supabase = getSupabaseClient();
+  const challenge = await getAnyChallenge(input.challengeId);
+  const { data, error } = await supabase
+    .from("submissions")
+    .insert({
+      event_id: input.eventId,
+      challenge_id: input.challengeId,
+      user_id: input.userId,
+      proof_type: challenge?.proofType ?? "none",
+      note: "declined_by_user",
+      status: "rejected",
+      points_awarded: 0,
+    })
+    .select()
+    .single();
+  if (error) raise(error);
+  return mapSubmissionRow(data);
+}
+
 /** Nutzt die cast_vote()-RPC (siehe schema.sql) – Stimme + Quorum-Check +
  * Status-Update laufen dort atomar, damit gleichzeitige Stimmen von
  * mehreren Handys nicht zu einem falschen Endstatus führen können. */
@@ -708,6 +741,39 @@ export function subscribeToSubmission(
         if (data) onChange(await mapSubmissionRow(data));
       }
     )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+/**
+ * Live-Updates für ALLE Submissions eines Events – das ist die eigentliche
+ * "Sync mit anderen Spielern zur Abstimmung": ohne das würde eine neu
+ * eingereichte Challenge eines Mitspielers erst nach manuellem Neuladen
+ * bei den anderen auftauchen, die dann darüber abstimmen sollen. Reagiert
+ * auf neue Submissions (event_id-gefiltert) UND auf neue/geänderte Votes
+ * (Tabelle "votes" hat kein event_id, deshalb hier ungefiltert – ein
+ * Refetch bei JEDER Stimme irgendeines Events ist minimal ineffizient,
+ * aber unkritisch und deutlich einfacher als ein Join-Filter).
+ */
+export function subscribeToEventSubmissions(
+  eventId: string,
+  onChange: (submissions: Submission[]) => void
+): () => void {
+  const supabase = getSupabaseClient();
+  const refetch = async () => {
+    onChange(await listSubmissions(eventId));
+  };
+  const channel = supabase
+    .channel(`event-submissions-${eventId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "submissions", filter: `event_id=eq.${eventId}` },
+      refetch
+    )
+    .on("postgres_changes", { event: "*", schema: "public", table: "votes" }, refetch)
     .subscribe();
 
   return () => {

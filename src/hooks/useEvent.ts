@@ -7,8 +7,27 @@ import {
   listSubmissionsForUser,
   getAnyChallenge,
   subscribeToSubmission,
+  subscribeToEventSubmissions,
+  isRemoteMode,
 } from "@/lib/data-layer";
 import { GameEvent, Submission, Challenge } from "@/types";
+
+/** Bei mehreren Submissions zur selben Challenge (Nacheinreichung nach
+ * Ablehnung – siehe declineChallenge()/"Nochmal versuchen") zählt für den
+ * Status immer die zuletzt eingereichte, nicht irgendeine ältere. Ohne
+ * das könnte eine frische, noch offene Einreichung von einer alten
+ * abgelehnten überdeckt werden, je nachdem in welcher Reihenfolge die
+ * Datenbank die Zeilen zurückgibt. */
+export function latestByChallenge(submissions: Submission[]): Map<string, Submission> {
+  const byChallenge = new Map<string, Submission>();
+  for (const s of submissions) {
+    const current = byChallenge.get(s.challengeId);
+    if (!current || new Date(s.createdAt).getTime() > new Date(current.createdAt).getTime()) {
+      byChallenge.set(s.challengeId, s);
+    }
+  }
+  return byChallenge;
+}
 
 export function useEvent(eventId: string) {
   const [event, setEvent] = useState<GameEvent | null | undefined>(undefined);
@@ -23,6 +42,21 @@ export function useEvent(eventId: string) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // "Sync mit anderen Spielern": neue Einreichungen von Mitspielern (zum
+  // Abstimmen) und neue/geänderte Stimmen sollen live ankommen, nicht erst
+  // nach einem manuellen Reload. Supabase-Modus nutzt Realtime, der lokale
+  // Demo-Modus pollt (dort gibt es kein Realtime, aber Bot-Stimmen
+  // kommen zeitversetzt per setTimeout rein, siehe lib/db.ts).
+  useEffect(() => {
+    if (isRemoteMode()) {
+      return subscribeToEventSubmissions(eventId, setSubmissions);
+    }
+    const interval = setInterval(() => {
+      listSubmissions(eventId).then(setSubmissions);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [eventId]);
 
   return { event, submissions, refresh };
 }
@@ -50,9 +84,9 @@ export function useEventChallenge(eventId: string, challengeId: string, userId?:
     if (!userId) return;
     let cancelled = false;
     (async () => {
-      const existing = (await listSubmissionsForUser(eventId, userId)).find(
-        (s) => s.challengeId === challengeId
-      );
+      const existing = latestByChallenge(
+        await listSubmissionsForUser(eventId, userId)
+      ).get(challengeId);
       if (!cancelled && existing) setSubmission(existing);
     })();
     return () => {

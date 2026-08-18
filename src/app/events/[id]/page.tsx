@@ -8,20 +8,22 @@ import { TopBar } from "@/components/layout/TopBar";
 import { ChallengeCard } from "@/components/challenges/ChallengeCard";
 import { DiceRoller } from "@/components/challenges/DiceRoller";
 import { PartyPushToggle } from "@/components/challenges/PartyPushToggle";
+import { PendingVotes } from "@/components/challenges/PendingVotes";
 // PartyBingoPanel ist vorerst deaktiviert (siehe Kommentar unten) - Import
 // bewusst entfernt, um keinen "unused import"-Lint-Fehler zu haben.
 import { TopBarSkeleton, Skeleton } from "@/components/ui/Skeleton";
-import { useEvent } from "@/hooks/useEvent";
+import { useEvent, latestByChallenge } from "@/hooks/useEvent";
 import { useProfile } from "@/hooks/useProfile";
-import { getAnyChallenge, isRemoteMode } from "@/lib/data-layer";
+import { getAnyChallenge, listGroupMembers, isRemoteMode } from "@/lib/data-layer";
 import { formatDate } from "@/lib/utils";
-import { Challenge } from "@/types";
+import { Challenge, Profile } from "@/types";
 
 export default function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = usePromise(params);
-  const { event, submissions } = useEvent(id);
+  const { event, submissions, refresh } = useEvent(id);
   const { profile } = useProfile();
   const [revealed, setRevealed] = useState<Challenge[]>([]);
+  const [members, setMembers] = useState<Profile[]>([]);
 
   // event.challengeIds wächst ausschließlich durch Würfeln – hier stehen
   // also nur Challenges, die die Gruppe in diesem Abend schon aufgedeckt hat.
@@ -38,6 +40,23 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
       setRevealed(
         challenges.filter((c): c is Challenge => Boolean(c)).reverse()
       );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [event]);
+
+  // Für die Abstimmungskarten (PendingVotes): Name + Avatar des
+  // Einreichenden anzeigen zu können.
+  useEffect(() => {
+    if (!event) {
+      setMembers([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const m = await listGroupMembers(event.groupId);
+      if (!cancelled) setMembers(m);
     })();
     return () => {
       cancelled = true;
@@ -64,14 +83,19 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
     );
   }
 
+  // Bei mehreren Submissions zur selben Challenge (Nacheinreichung nach
+  // Ablehnung) zählt immer die zuletzt eingereichte für den Status – siehe
+  // latestByChallenge() in hooks/useEvent.ts.
+  const myLatestByChallenge = latestByChallenge(
+    submissions.filter((s) => s.userId === profile?.id)
+  );
   function statusFor(challengeId: string) {
-    const sub = submissions.find(
-      (s) => s.challengeId === challengeId && s.userId === profile?.id
-    );
-    return sub?.status;
+    return myLatestByChallenge.get(challengeId)?.status;
   }
 
   const doneCount = revealed.filter((c) => statusFor(c.id) === "approved").length;
+  const challengesById = new Map(revealed.map((c) => [c.id, c]));
+  const membersById = new Map(members.map((m) => [m.id, m]));
 
   return (
     <AppShell>
@@ -99,6 +123,14 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
             lässt: {event.type === "party" && isRemoteMode() && <PartyBingoPanel eventId={event.id} />} */}
 
         <DiceRoller eventId={event.id} />
+
+        <PendingVotes
+          submissions={submissions}
+          challengesById={challengesById}
+          membersById={membersById}
+          currentUserId={profile?.id}
+          onVoted={refresh}
+        />
 
         {revealed.length > 0 && (
           <div className="mb-2">
