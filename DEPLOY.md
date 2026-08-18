@@ -65,6 +65,77 @@ gebaut und konnte daher nicht live gegen ein echtes Projekt getestet
 werden – bitte einmal mit zwei Geräten/Browser-Profilen durchklicken, bevor
 darauf eine echte Party läuft (Details dazu ebenfalls in `SETUP.md`).
 
+## 5. (Optional) Automatische Push-Challenges im Party-Modus einrichten
+
+Braucht Supabase (Schritt 4) und die [Supabase CLI](https://supabase.com/docs/guides/cli).
+Läuft komplett serverseitig – funktioniert auch, wenn alle Teilnehmer die
+PWA geschlossen haben. Ohne diese Schritte funktioniert die App ganz normal
+weiter, nur der Schalter "🔔 Automatische Challenges" im Party-Modus bleibt
+ohne Wirkung.
+
+1. **VAPID-Schlüsselpaar erzeugen** (einmalig, lokal, keine Netzwerkverbindung
+   nötig):
+   ```bash
+   npx web-push generate-vapid-keys
+   ```
+   Liefert einen `Public Key` und einen `Private Key`.
+
+2. **`pg_cron` und `pg_net` aktivieren** – im Supabase Dashboard unter
+   *Database → Extensions* beide suchen und aktivieren (oder per SQL-Editor:
+   `create extension if not exists pg_cron; create extension if not exists pg_net;`).
+
+3. **Edge Function deployen** (aus dem entpackten Projektordner):
+   ```bash
+   supabase login
+   supabase link --project-ref <dein-project-ref>
+   supabase functions deploy party-push-tick
+   ```
+
+4. **Secrets für die Edge Function setzen** (der Private Key darf NIEMALS
+   ins Frontend/`.env.local`, nur hierhin):
+   ```bash
+   supabase secrets set \
+     VAPID_PUBLIC_KEY=<Public Key aus Schritt 1> \
+     VAPID_PRIVATE_KEY=<Private Key aus Schritt 1> \
+     VAPID_SUBJECT=mailto:deine@email.de
+   ```
+
+5. **Cron-Zeitplan anlegen** – im SQL-Editor deines Supabase-Projekts (Werte
+   aus `<project-ref>` und deinem `service_role`-Key einsetzen, siehe auch
+   der auskommentierte Block am Ende von `supabase/schema.sql`):
+   ```sql
+   select cron.schedule(
+     'party-push-tick',
+     '* * * * *',
+     $$
+     select net.http_post(
+       url := 'https://<project-ref>.supabase.co/functions/v1/party-push-tick',
+       headers := jsonb_build_object(
+         'Authorization', 'Bearer <service-role-key>',
+         'Content-Type', 'application/json'
+       ),
+       body := '{}'::jsonb
+     );
+     $$
+   );
+   ```
+
+6. **Client-Env-Var setzen** – in Vercel (und/oder `.env.local`):
+   `NEXT_PUBLIC_VAPID_PUBLIC_KEY=<Public Key aus Schritt 1>`, dann redeployen.
+
+7. **Testen**: Party starten (Modi → Abend starten), im Event-Bildschirm den
+   "🔔 Automatische Challenges"-Schalter aktivieren (Browser fragt nach der
+   Notification-Berechtigung), Intervall wählen. Die erste Push-Challenge
+   kommt beim nächsten Scheduler-Tick (max. 1 Minute, danach im gewählten
+   Intervall). Fehlt eine Notification, zuerst `supabase functions logs
+   party-push-tick` prüfen.
+
+Auch dieser Teil konnte aus derselben netzwerklosen Umgebung heraus nicht
+live gegen einen echten Push-Dienst getestet werden – Edge-Function-Code
+und SQL wurden sorgfältig gegen die Web-Push-/pg_cron-Dokumentation gebaut,
+aber ein erster Testlauf mit echtem Gerät vor einer echten Party ist
+Pflicht, kein "nice to have".
+
 ## Warum kein Auto-Deploy durch mich?
 
 Der verbundene Vercel-Account (Team "Sxmu's projects") hat aktuell keine

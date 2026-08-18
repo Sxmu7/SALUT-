@@ -153,12 +153,15 @@ export default function DashboardPage() {
           className="relative overflow-hidden"
         >
           <div
-            className="absolute -right-10 -top-10 w-40 h-40 rounded-full opacity-25 blur-2xl"
-            style={{ background: "var(--gradient-party)" }}
+            className="absolute -right-10 -top-10 w-40 h-40 rounded-full opacity-20 blur-2xl"
+            style={{ background: "var(--accent)" }}
           />
           <div className="relative flex items-center justify-between">
             <div>
-              <p className="text-muted text-xs font-semibold uppercase tracking-wide">
+              <p className="text-muted text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5">
+                {isLiveEvent && (
+                  <span className="pulse-ring inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />
+                )}
                 {isLiveEvent ? "Läuft jetzt" : "Nächstes Event"}
               </p>
               <p className="font-display font-bold text-lg mt-1 flex items-center gap-1.5">
@@ -188,7 +191,7 @@ export default function DashboardPage() {
               <motion.div
                 whileTap={{ scale: 0.97 }}
                 className="relative mt-4 text-center py-3 rounded-xl font-semibold text-sm"
-                style={{ background: "var(--gradient-party)" }}
+                style={{ background: "var(--gradient-accent)" }}
               >
                 Event öffnen →
               </motion.div>

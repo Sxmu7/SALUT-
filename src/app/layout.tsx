@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { PushNavigationBridge } from "@/components/PushNavigationBridge";
 
 export const metadata: Metadata = {
   title: "Salut! – Die Trinkspiel App",
@@ -34,6 +35,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="de" className="h-full antialiased">
       <body className="min-h-full flex flex-col bg-background text-foreground bg-noise">
+        <PushNavigationBridge />
         {children}
       </body>
     </html>

@@ -15,9 +15,15 @@
   --warning: #ffd60a;
   --info: #64d2ff;
 
+  /* Nur noch für die paar bewusst "festlichen" Momente der App (Modi-Hero,
+     Würfel-Icon im Ruhezustand, Geburtstags-Banner, Bestanden-Banner,
+     Bingo-Gewinner) - siehe --accent für die alltägliche UI. */
   --gradient-party: linear-gradient(135deg, #ff375f 0%, #bf5af2 50%, #64d2ff 100%);
   --gradient-gold: linear-gradient(135deg, #ffd60a 0%, #ff9f0a 100%);
   --gradient-dark: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 100%);
+  /* Ruhigere, einfarbige Variante für Buttons/Badges/Toggles im Alltag -
+     etwas Tiefe ohne den Regenbogen-Effekt von --gradient-party. */
+  --gradient-accent: linear-gradient(135deg, #d17bf5 0%, #bf5af2 100%);
 
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -91,11 +97,13 @@ html {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+/* War früher ein Regenbogen-Gradient auf dem Text (Punkte, Countdown,
+   Logo, ...) - für den minimalistischeren Look jetzt eine einzelne,
+   ruhige Akzentfarbe. gradient-gold-text bleibt bewusst ein Gradient,
+   weil Gold weiterhin für echte Besonderheit (Sieger, Geburtstag,
+   exklusive Challenges) reserviert ist. */
 .gradient-text {
-  background: var(--gradient-party);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--accent);
 }
 
 .gradient-gold-text {
@@ -192,4 +200,36 @@ textarea:focus {
 .bg-noise {
   background-image: radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
   background-size: 3px 3px;
+}
+
+/* ---------- Mikro-Animationen ---------- */
+
+/* Ein sanfter Ring, der einmal nach außen pulsiert - für "live"/aktive
+   Zustände (z.B. ein laufendes Event), dezenter als ein Dauer-Glow. */
+.pulse-ring {
+  position: relative;
+}
+.pulse-ring::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1.5px solid var(--accent);
+  animation: pulse-ring 2.2s ease-out infinite;
+}
+@keyframes pulse-ring {
+  0% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse-ring::after {
+    animation: none;
+    display: none;
+  }
 }

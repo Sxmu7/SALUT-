@@ -7,10 +7,12 @@ import { AppShell } from "@/components/layout/AppShell";
 import { TopBar } from "@/components/layout/TopBar";
 import { ChallengeCard } from "@/components/challenges/ChallengeCard";
 import { DiceRoller } from "@/components/challenges/DiceRoller";
+import { PartyPushToggle } from "@/components/challenges/PartyPushToggle";
+import { PartyBingoPanel } from "@/components/challenges/PartyBingoPanel";
 import { TopBarSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { useEvent } from "@/hooks/useEvent";
 import { useProfile } from "@/hooks/useProfile";
-import { getAnyChallenge } from "@/lib/data-layer";
+import { getAnyChallenge, isRemoteMode } from "@/lib/data-layer";
 import { formatDate } from "@/lib/utils";
 import { Challenge } from "@/types";
 
@@ -88,6 +90,9 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
             🎂 Geburtstags-Special – exklusive Challenges im Würfel-Topf!
           </motion.div>
         )}
+
+        {event.type === "party" && isRemoteMode() && <PartyPushToggle eventId={event.id} />}
+        {event.type === "party" && isRemoteMode() && <PartyBingoPanel eventId={event.id} />}
 
         <DiceRoller eventId={event.id} />
 

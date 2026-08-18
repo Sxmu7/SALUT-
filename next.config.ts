@@ -12,7 +12,7 @@ const nextConfig: NextConfig = {
     // veralteten, zwischengespeicherten Renders.
     staleTimes: {
       dynamic: 0,
-      static: 0,
+      static: 30, // Minimum, das Next.js zulässt – niedrigster möglicher Cache
     },
   },
 };

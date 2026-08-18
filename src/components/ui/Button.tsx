@@ -12,7 +12,7 @@ interface ButtonProps extends Omit<HTMLMotionProps<"button">, "children"> {
 }
 
 const variants: Record<string, string> = {
-  primary: "text-white shadow-[0_8px_30px_rgba(191,90,242,0.35)]",
+  primary: "text-white shadow-[0_6px_20px_rgba(191,90,242,0.25)]",
   secondary: "bg-white/8 text-foreground border border-white/10",
   ghost: "bg-transparent text-foreground",
   danger: "bg-[#FF453A]/15 text-[#FF453A] border border-[#FF453A]/30",
@@ -48,7 +48,7 @@ export function Button({
       )}
       style={
         variant === "primary"
-          ? { background: "var(--gradient-party)", ...props.style }
+          ? { background: "var(--gradient-accent)", ...props.style }
           : props.style
       }
       {...props}

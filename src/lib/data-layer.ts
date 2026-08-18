@@ -19,6 +19,10 @@ import {
   Submission,
   RankingEntry,
   CategoryId,
+  PartyPushState,
+  PartyBingoConfig,
+  BingoSnapshot,
+  BingoWinCondition,
 } from "@/types";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import * as local from "@/lib/db";
@@ -172,4 +176,88 @@ export function subscribeToSubmission(
 ): () => void {
   if (!isRemoteMode()) return () => {};
   return remote.subscribeToSubmission(submissionId, onChange);
+}
+
+// ---------------------------- Party-Push (Party-Modus) ----------------------------
+// Automatische Challenges per Push laufen komplett serverseitig (Supabase
+// Edge Function + pg_cron, siehe supabase/functions/party-push-tick) und
+// brauchen deshalb ein echtes Supabase-Projekt. Im lokalen Demo-Modus gibt
+// es dafür keinen Server – die UI blendet den entsprechenden Schalter dort
+// aus (siehe isRemoteMode()-Check in events/[id]/page.tsx), diese
+// Funktionen werfen also im Normalfall dort nie.
+
+function requireRemoteMode(feature: string): void {
+  if (!isRemoteMode()) {
+    throw new Error(
+      `${feature} steht nur im Supabase-Modus zur Verfügung (siehe SETUP.md).`
+    );
+  }
+}
+
+export async function getPartyPushState(eventId: string): Promise<PartyPushState | null> {
+  requireRemoteMode("Automatische Push-Challenges");
+  return remote.getPartyPushState(eventId);
+}
+
+export async function setPartyPushConfig(
+  eventId: string,
+  config: { enabled: boolean; intervalMinutes?: number; random?: boolean; noDuplicates?: boolean }
+): Promise<PartyPushState> {
+  requireRemoteMode("Automatische Push-Challenges");
+  return remote.setPartyPushConfig(eventId, config);
+}
+
+export async function savePushSubscription(sub: {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}): Promise<void> {
+  requireRemoteMode("Automatische Push-Challenges");
+  return remote.savePushSubscription(sub);
+}
+
+// ---------------------------- Party-Bingo (Party-Modus) ----------------------------
+// Kartenerzeugung und Gewinner-Ermittlung laufen serverseitig (siehe
+// schema.sql) und brauchen deshalb ein echtes Supabase-Projekt – im
+// lokalen Demo-Modus blendet die UI Party-Bingo entsprechend aus (siehe
+// isRemoteMode()-Check in events/[id]/page.tsx).
+
+export async function getBingoSnapshot(eventId: string): Promise<BingoSnapshot | null> {
+  requireRemoteMode("Party-Bingo");
+  return remote.getBingoSnapshot(eventId);
+}
+
+export async function startPartyBingo(
+  eventId: string,
+  config?: {
+    gridSize?: number;
+    freeCenter?: boolean;
+    winCondition?: BingoWinCondition;
+    requireConfirmations?: number;
+  }
+): Promise<PartyBingoConfig> {
+  requireRemoteMode("Party-Bingo");
+  return remote.startPartyBingo(eventId, config);
+}
+
+export async function reportBingoEvent(bingoEventId: string): Promise<void> {
+  requireRemoteMode("Party-Bingo");
+  return remote.reportBingoEvent(bingoEventId);
+}
+
+export async function finishPartyBingo(bingoId: string): Promise<PartyBingoConfig> {
+  requireRemoteMode("Party-Bingo");
+  return remote.finishPartyBingo(bingoId);
+}
+
+/** Live-Updates für eine laufende Bingo-Runde. Im Demo-Modus (kein
+ * Realtime, kein Server) gibt es No-Op-Unsubscribe zurück – die UI wird
+ * dort ohnehin gar nicht gerendert. */
+export function subscribeToBingo(
+  eventId: string,
+  bingoId: string,
+  onChange: (snapshot: BingoSnapshot | null) => void
+): () => void {
+  if (!isRemoteMode()) return () => {};
+  return remote.subscribeToBingo(eventId, bingoId, onChange);
 }

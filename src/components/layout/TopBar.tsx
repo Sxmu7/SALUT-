@@ -19,8 +19,8 @@ export function TopBar({
       className="safe-top px-5 pt-5 pb-3 flex items-center justify-between"
     >
       <div>
-        <h1 className="font-display text-2xl font-extrabold tracking-tight">{title}</h1>
-        {subtitle && <p className="text-muted text-sm mt-0.5">{subtitle}</p>}
+        <h1 className="font-display text-[21px] font-bold tracking-tight leading-tight">{title}</h1>
+        {subtitle && <p className="text-muted text-[13px] mt-1">{subtitle}</p>}
       </div>
       {right}
     </motion.header>

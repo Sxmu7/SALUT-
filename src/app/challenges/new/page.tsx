@@ -98,7 +98,7 @@ export default function NewChallengePage() {
             className={`flex-1 py-2.5 rounded-xl text-sm font-semibold ${
               tab === "manual" ? "text-white" : "card-surface text-muted"
             }`}
-            style={tab === "manual" ? { background: "var(--gradient-party)" } : {}}
+            style={tab === "manual" ? { background: "var(--gradient-accent)" } : {}}
           >
             ✍️ Manuell
           </button>
@@ -107,7 +107,7 @@ export default function NewChallengePage() {
             className={`flex-1 py-2.5 rounded-xl text-sm font-semibold ${
               tab === "upload" ? "text-white" : "card-surface text-muted"
             }`}
-            style={tab === "upload" ? { background: "var(--gradient-party)" } : {}}
+            style={tab === "upload" ? { background: "var(--gradient-accent)" } : {}}
           >
             📄 Dokument
           </button>

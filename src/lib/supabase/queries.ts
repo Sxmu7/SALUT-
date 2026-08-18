@@ -21,11 +21,45 @@ import {
   Submission,
   RankingEntry,
   CategoryId,
+  PartyPushState,
+  PartyBingoConfig,
+  BingoEventItem,
+  BingoCardCell,
+  BingoPlayerProgress,
+  BingoSnapshot,
+  BingoWinCondition,
 } from "@/types";
 import { CHALLENGES } from "@/lib/data/challenges";
 import { isTodayBirthday, uid } from "@/lib/utils";
 import { getSupabaseClient } from "./client";
 import { ensureSupabaseUser } from "./auth";
+
+// ---------------------------- Fehler-Helfer ----------------------------
+
+/**
+ * supabase-js gibt bei einem Query-Fehler NUR dann eine echte `Error`-
+ * Instanz zurück, wenn man `.throwOnError()` verwendet. Der Rest dieser
+ * Datei (wie der ursprüngliche Code) destrukturiert stattdessen
+ * `{ data, error }` und wirft `error` selbst – das ist aber nur ein
+ * PLAIN OBJECT (`JSON.parse()` der Fehlerantwort), kein `Error`. Jedes
+ * `catch (err) { ... err instanceof Error ? err.message : "generischer
+ * Fallback-Text" ... }` in der UI hat deshalb bisher IMMER den
+ * generischen Fallback gezeigt und die echte Postgres/RLS-Fehlermeldung
+ * verschluckt – auch bei den Fehlern, die in dieser Session gemeldet
+ * wurden. Diese Funktion wandelt das PostgREST-Fehlerobjekt in eine
+ * echte Error-Instanz mit lesbarer Message um, damit `instanceof Error`
+ * überall dort, wo bereits sauber gefangen wird, endlich true ist und
+ * der Nutzer den tatsächlichen Fehler sieht statt einer Nullmeldung.
+ */
+function raise(
+  error: { message?: string; details?: string; hint?: string; code?: string } | null
+): never {
+  if (!error) throw new Error("Unbekannter Fehler.");
+  const parts = [error.message || "Unbekannter Fehler."];
+  if (error.hint) parts.push(`Hinweis: ${error.hint}`);
+  if (error.code) parts.push(`(Code ${error.code})`);
+  throw new Error(parts.join(" — "));
+}
 
 // ---------------------------- Mapping-Helfer ----------------------------
 
@@ -161,7 +195,7 @@ export async function createOrUpdateProfile(patch: Partial<Profile>): Promise<Pr
     .upsert(next)
     .select()
     .single();
-  if (error) throw error;
+  if (error) raise(error);
   const profile = mapProfileRow(data);
 
   // Ein brandneues Profil ohne jede Gruppe würde die App sonst dauerhaft
@@ -206,7 +240,7 @@ export async function listGroups(): Promise<Group[]> {
   // "Nutzer hat wirklich keine Gruppe" und verschluckt den eigentlichen
   // Fehler komplett. Aufrufer, die das tolerieren können (z.B. best-effort
   // Hintergrundchecks), fangen das gezielt selbst ab.
-  if (error) throw error;
+  if (error) raise(error);
   if (!data) return [];
   const rows = data
     .map((row: { groups: Record<string, unknown> | null }) => row.groups)
@@ -228,7 +262,7 @@ export async function createGroup(name: string, emoji: string): Promise<Group> {
     p_name: name,
     p_emoji: emoji,
   });
-  if (error) throw error;
+  if (error) raise(error);
   return mapGroupRow(data as Record<string, unknown>);
 }
 
@@ -304,7 +338,7 @@ export async function addCustomChallenges(newOnes: Challenge[]): Promise<Challen
     source: c.source ?? "manual",
   }));
   const { error } = await supabase.from("challenges").insert(rows);
-  if (error) throw error;
+  if (error) raise(error);
   return listAllChallenges();
 }
 
@@ -357,7 +391,7 @@ export async function createEvent(input: {
     })
     .select()
     .single();
-  if (error) throw error;
+  if (error) raise(error);
   return mapEventRow(data);
 }
 
@@ -454,7 +488,7 @@ export async function addChallengeToEvent(
       challenge_id: challengeId,
       sort_order: event.challengeIds.length,
     });
-    if (error) throw error;
+    if (error) raise(error);
   }
   return getEvent(eventId);
 }
@@ -561,7 +595,7 @@ export async function submitChallengeProof(input: {
     })
     .select()
     .single();
-  if (error) throw error;
+  if (error) raise(error);
   return mapSubmissionRow(data);
 }
 
@@ -644,4 +678,305 @@ export async function computeRanking(groupId: string): Promise<RankingEntry[]> {
     previousRank: i + 1,
     trend: "same" as const,
   }));
+}
+
+// ---------------------------- Party-Push (Party-Modus) ----------------------------
+// Nur im Supabase-Modus verfügbar – der lokale Demo-Modus hat keinen
+// Server, der einen Scheduler/Push-Versand betreiben könnte. Die UI ruft
+// diese Funktionen deshalb nur auf, wenn isRemoteMode() true ist.
+
+function mapPartyPushStateRow(row: Record<string, unknown>): PartyPushState {
+  return {
+    eventId: row.event_id as string,
+    pushEnabled: Boolean(row.push_enabled),
+    intervalMinutes: row.interval_minutes as number,
+    randomPick: Boolean(row.random_pick),
+    noDuplicates: Boolean(row.no_duplicates),
+    cycle: row.cycle as number,
+    nextPushAt: (row.next_push_at as string | null) ?? null,
+  };
+}
+
+export async function getPartyPushState(eventId: string): Promise<PartyPushState | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("party_push_state")
+    .select("*")
+    .eq("event_id", eventId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return mapPartyPushStateRow(data);
+}
+
+/** Nutzt die set_party_push_config()-RPC (siehe schema.sql) – prüft dort
+ * serverseitig die Gruppenmitgliedschaft, damit niemand für ein Event
+ * einer fremden Gruppe Pushs (de)aktivieren kann. */
+export async function setPartyPushConfig(
+  eventId: string,
+  config: {
+    enabled: boolean;
+    intervalMinutes?: number;
+    random?: boolean;
+    noDuplicates?: boolean;
+  }
+): Promise<PartyPushState> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { data, error } = await supabase.rpc("set_party_push_config", {
+    p_event_id: eventId,
+    p_enabled: config.enabled,
+    p_interval_minutes: config.intervalMinutes ?? 5,
+    p_random: config.random ?? true,
+    p_no_duplicates: config.noDuplicates ?? true,
+  });
+  if (error) raise(error);
+  return mapPartyPushStateRow(data as Record<string, unknown>);
+}
+
+/** Legt die per subscribeToPush() erzeugte Browser-Subscription für den
+ * aktuellen Nutzer ab (mehrere Geräte pro Nutzer sind erlaubt – jede
+ * Subscription ist eine eigene Zeile, per `endpoint` eindeutig). */
+export async function savePushSubscription(sub: {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}): Promise<void> {
+  const supabase = getSupabaseClient();
+  const userId = await ensureSupabaseUser();
+  const { error } = await supabase.from("push_subscriptions").upsert(
+    {
+      user_id: userId,
+      endpoint: sub.endpoint,
+      p256dh: sub.p256dh,
+      auth: sub.auth,
+    },
+    { onConflict: "endpoint" }
+  );
+  if (error) raise(error);
+}
+
+// ---------------------------- Party-Bingo (Party-Modus) ----------------------------
+// Nur im Supabase-Modus verfügbar – Kartenerzeugung und Gewinner-
+// Ermittlung laufen ausschließlich serverseitig über die
+// Security-Definer-Funktionen in schema.sql (siehe Kommentare dort). Die
+// UI ruft diese Funktionen deshalb nur auf, wenn isRemoteMode() true ist.
+
+function mapPartyBingoRow(row: Record<string, unknown>): PartyBingoConfig {
+  return {
+    id: row.id as string,
+    eventId: row.event_id as string,
+    status: row.status as "active" | "finished",
+    gridSize: row.grid_size as number,
+    freeCenter: Boolean(row.free_center),
+    winCondition: row.win_condition as BingoWinCondition,
+    requireConfirmations: row.require_confirmations as number,
+    winnerUserId: (row.winner_user_id as string | null) ?? null,
+    createdAt: row.created_at as string,
+    finishedAt: (row.finished_at as string | null) ?? null,
+  };
+}
+
+export async function getPartyBingo(eventId: string): Promise<PartyBingoConfig | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("party_bingo")
+    .select("*")
+    .eq("event_id", eventId)
+    .maybeSingle();
+  if (error) raise(error);
+  if (!data) return null;
+  return mapPartyBingoRow(data);
+}
+
+/** Nutzt die start_party_bingo()-RPC – prüft dort serverseitig die
+ * Gruppenmitgliedschaft, kopiert den Ereignis-Katalog für diese eine
+ * Runde und legt für jedes aktuelle Gruppenmitglied direkt eine Karte an.
+ * Idempotent: läuft für das Event schon eine Runde, kommt die bestehende
+ * zurück statt eine zweite anzulegen. */
+export async function startPartyBingo(
+  eventId: string,
+  config: {
+    gridSize?: number;
+    freeCenter?: boolean;
+    winCondition?: BingoWinCondition;
+    requireConfirmations?: number;
+  } = {}
+): Promise<PartyBingoConfig> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { data, error } = await supabase.rpc("start_party_bingo", {
+    p_event_id: eventId,
+    p_grid_size: config.gridSize ?? 5,
+    p_free_center: config.freeCenter ?? true,
+    p_win_condition: config.winCondition ?? "one_line",
+    p_require_confirmations: config.requireConfirmations ?? 1,
+  });
+  if (error) raise(error);
+  return mapPartyBingoRow(data as Record<string, unknown>);
+}
+
+async function fetchBingoEvents(bingoId: string): Promise<BingoEventItem[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("party_bingo_events")
+    .select("id, event_text, icon, is_triggered")
+    .eq("bingo_id", bingoId)
+    .order("event_text", { ascending: true });
+  if (error) raise(error);
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    id: row.id as string,
+    text: row.event_text as string,
+    icon: row.icon as string,
+    isTriggered: Boolean(row.is_triggered),
+  }));
+}
+
+/** Holt (und legt bei Bedarf serverseitig an) die eigene Karte über die
+ * get_my_bingo_card()-RPC, dann die zugehörigen Zellen inkl. verknüpftem
+ * Ereignis (Ein-Ebenen-Embed party_bingo_cells -> party_bingo_events, wie
+ * an anderer Stelle in dieser Datei schon für group_members -> groups
+ * genutzt). */
+async function fetchMyBingoCard(bingoId: string): Promise<BingoCardCell[]> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { data: cardData, error: cardError } = await supabase.rpc("get_my_bingo_card", {
+    p_bingo_id: bingoId,
+  });
+  if (cardError) raise(cardError);
+  const card = cardData as Record<string, unknown>;
+
+  const { data, error } = await supabase
+    .from("party_bingo_cells")
+    .select("position, is_free, party_bingo_events(id, event_text, icon, is_triggered)")
+    .eq("card_id", card.id as string)
+    .order("position", { ascending: true });
+  if (error) raise(error);
+  return (data ?? []).map((row: Record<string, unknown>) => {
+    const ev = row.party_bingo_events as Record<string, unknown> | null;
+    return {
+      position: row.position as number,
+      isFree: Boolean(row.is_free),
+      eventId: ev ? (ev.id as string) : null,
+      text: ev ? (ev.event_text as string) : null,
+      icon: ev ? (ev.icon as string) : null,
+      isTriggered: ev ? Boolean(ev.is_triggered) : false,
+    };
+  });
+}
+
+/** Fortschritt aller Mitspieler. Solange die Runde aktiv ist, liefert RLS
+ * hier automatisch nur die eigene Karte zurück (siehe schema.sql) – die
+ * UI zeigt "playersProgress" deshalb bewusst erst nach Spielende an,
+ * ohne das hier extra prüfen zu müssen. */
+async function fetchBingoPlayersProgress(
+  bingoId: string,
+  gridSize: number,
+  winnerUserId: string | null
+): Promise<BingoPlayerProgress[]> {
+  const supabase = getSupabaseClient();
+
+  const { data: cardRows, error: cardsError } = await supabase
+    .from("party_bingo_cards")
+    .select("id, user_id, profiles(name, avatar_emoji)")
+    .eq("bingo_id", bingoId);
+  if (cardsError) raise(cardsError);
+  if (!cardRows || cardRows.length === 0) return [];
+
+  const { data: cellRows, error: cellsError } = await supabase
+    .from("party_bingo_cells")
+    .select("card_id, is_free, party_bingo_events(is_triggered)")
+    .eq("bingo_id", bingoId);
+  if (cellsError) raise(cellsError);
+
+  const completedByCard = new Map<string, number>();
+  for (const cell of (cellRows ?? []) as Record<string, unknown>[]) {
+    const cardId = cell.card_id as string;
+    const ev = cell.party_bingo_events as Record<string, unknown> | null;
+    const done = Boolean(cell.is_free) || Boolean(ev?.is_triggered);
+    if (done) completedByCard.set(cardId, (completedByCard.get(cardId) ?? 0) + 1);
+  }
+
+  const totalCount = gridSize * gridSize;
+  return (cardRows as Record<string, unknown>[]).map((row) => {
+    const profile = row.profiles as Record<string, unknown> | null;
+    return {
+      userId: row.user_id as string,
+      name: (profile?.name as string) ?? "Spieler",
+      avatarEmoji: (profile?.avatar_emoji as string) ?? "🥂",
+      completedCount: completedByCard.get(row.id as string) ?? 0,
+      totalCount,
+      isWinner: row.user_id === winnerUserId,
+    };
+  });
+}
+
+/** Kompletter Bingo-Zustand für ein Event in einem Aufruf – Grundlage für
+ * usePartyBingo(). Gibt null zurück, wenn für dieses Event noch keine
+ * Runde gestartet wurde. */
+export async function getBingoSnapshot(eventId: string): Promise<BingoSnapshot | null> {
+  const bingo = await getPartyBingo(eventId);
+  if (!bingo) return null;
+  const [events, myCard, playersProgress] = await Promise.all([
+    fetchBingoEvents(bingo.id),
+    fetchMyBingoCard(bingo.id),
+    fetchBingoPlayersProgress(bingo.id, bingo.gridSize, bingo.winnerUserId),
+  ]);
+  return { bingo, events, myCard, playersProgress };
+}
+
+/** Nutzt die report_bingo_event()-RPC – meldet/bestätigt ein Ereignis.
+ * Die Funktion prüft serverseitig Mitgliedschaft + Bestätigungsschwelle,
+ * markiert das Feld bei Erreichen bei ALLEN Karten (über die abgeleitete
+ * is_triggered-Spalte) und ermittelt einen etwaigen Gewinner – ein Client
+ * bekommt hier nie die Möglichkeit, selbst einen Gewinner zu setzen. */
+export async function reportBingoEvent(bingoEventId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { error } = await supabase.rpc("report_bingo_event", {
+    p_bingo_event_id: bingoEventId,
+  });
+  if (error) raise(error);
+}
+
+/** Nutzt die finish_party_bingo()-RPC – schließt die Runde ab (mit oder
+ * ohne Gewinner) und macht dadurch über RLS automatisch alle Karten für
+ * den Reveal-Moment sichtbar. */
+export async function finishPartyBingo(bingoId: string): Promise<PartyBingoConfig> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { data, error } = await supabase.rpc("finish_party_bingo", { p_bingo_id: bingoId });
+  if (error) raise(error);
+  return mapPartyBingoRow(data as Record<string, unknown>);
+}
+
+/** Live-Updates für eine Bingo-Runde über Supabase Realtime – spiegelt
+ * bewusst subscribeToSubmission(): bei JEDER Änderung wird der komplette
+ * Snapshot neu geladen statt nur ein Teil-Patch angewendet, damit z.B. ein
+ * gerade ermittelter Gewinner sofort korrekt in allen abgeleiteten Werten
+ * (playersProgress etc.) ankommt. */
+export function subscribeToBingo(
+  eventId: string,
+  bingoId: string,
+  onChange: (snapshot: BingoSnapshot | null) => void
+): () => void {
+  const supabase = getSupabaseClient();
+  const refresh = async () => {
+    onChange(await getBingoSnapshot(eventId));
+  };
+  const channel = supabase
+    .channel(`bingo-${bingoId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "party_bingo", filter: `id=eq.${bingoId}` },
+      refresh
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "party_bingo_events", filter: `bingo_id=eq.${bingoId}` },
+      refresh
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }

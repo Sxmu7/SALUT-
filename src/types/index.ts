@@ -99,3 +99,77 @@ export interface RankingEntry {
   challengesCompleted: number;
   trend: "up" | "down" | "same" | "new";
 }
+
+/**
+ * Automatischer Push-Modus für eine Party (Event mit type="party").
+ * Nur im Supabase-Modus verfügbar – siehe lib/push.ts und
+ * supabase/functions/party-push-tick.
+ */
+export interface PartyPushState {
+  eventId: string;
+  pushEnabled: boolean;
+  intervalMinutes: number;
+  randomPick: boolean;
+  noDuplicates: boolean;
+  cycle: number;
+  nextPushAt: string | null;
+}
+
+/**
+ * Party-Bingo (Event mit type="party"). Nur im Supabase-Modus verfügbar –
+ * die Gewinner-Ermittlung/Kartenerzeugung läuft serverseitig (siehe
+ * supabase/schema.sql, Abschnitt "Party-Bingo").
+ */
+export type BingoWinCondition = "one_line" | "two_lines" | "full_card";
+
+export interface PartyBingoConfig {
+  id: string;
+  eventId: string;
+  status: "active" | "finished";
+  gridSize: number;
+  freeCenter: boolean;
+  winCondition: BingoWinCondition;
+  requireConfirmations: number;
+  winnerUserId: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+/** Ein Ereignis aus dem Bingo-Katalog dieser Runde – global pro Party,
+ * nicht pro Spieler. */
+export interface BingoEventItem {
+  id: string;
+  text: string;
+  icon: string;
+  isTriggered: boolean;
+}
+
+/** Eine Zelle der EIGENEN Bingo-Karte, angereichert mit dem verknüpften
+ * Ereignis (oder null bei der freien Mittelzelle). */
+export interface BingoCardCell {
+  position: number;
+  isFree: boolean;
+  eventId: string | null;
+  text: string | null;
+  icon: string | null;
+  isTriggered: boolean;
+}
+
+/** Fortschritt eines Mitspielers – bleibt dank RLS automatisch leer,
+ * solange die Runde aktiv ist (siehe schema.sql), erst nach Abschluss für
+ * den Reveal-Moment befüllt. */
+export interface BingoPlayerProgress {
+  userId: string;
+  name: string;
+  avatarEmoji: string;
+  completedCount: number;
+  totalCount: number;
+  isWinner: boolean;
+}
+
+export interface BingoSnapshot {
+  bingo: PartyBingoConfig;
+  events: BingoEventItem[];
+  myCard: BingoCardCell[];
+  playersProgress: BingoPlayerProgress[];
+}
