@@ -208,21 +208,22 @@ export async function listGroups(): Promise<Group[]> {
   return Promise.all(rows.map(mapGroupRow));
 }
 
+/** Nutzt die create_group()-RPC (siehe schema.sql) – ein direktes INSERT +
+ * anschließendes .select() aus dem Client würde an der "groups"-SELECT-
+ * Policy scheitern: Postgres behandelt die RETURNING-Zeile eines INSERT
+ * wie ein SELECT, aber die Erstmitgliedschaft (die genau diese Policy
+ * erfüllen würde) existiert im selben Moment noch nicht. Ergebnis wäre ein
+ * irreführendes "0 rows"/"Gruppe konnte nicht erstellt werden", obwohl die
+ * Gruppe technisch angelegt wurde. */
 export async function createGroup(name: string, emoji: string): Promise<Group> {
   const supabase = getSupabaseClient();
-  const userId = await ensureSupabaseUser();
-  const inviteCode = Math.random().toString(36).slice(2, 8).toUpperCase();
-  const { data: group, error } = await supabase
-    .from("groups")
-    .insert({ name, emoji, invite_code: inviteCode, owner_id: userId })
-    .select()
-    .single();
+  await ensureSupabaseUser();
+  const { data, error } = await supabase.rpc("create_group", {
+    p_name: name,
+    p_emoji: emoji,
+  });
   if (error) throw error;
-  const { error: memberError } = await supabase
-    .from("group_members")
-    .insert({ group_id: group.id, user_id: userId });
-  if (memberError) throw memberError;
-  return mapGroupRow(group);
+  return mapGroupRow(data as Record<string, unknown>);
 }
 
 /** Nutzt die join_group_by_code()-RPC (siehe schema.sql) – ein direkter

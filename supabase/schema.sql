@@ -3,6 +3,12 @@
 -- App von "lokalem Demo-Modus" auf echtes Multi-Device-Backend umzustellen.
 -- Danach NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY (und für
 -- den Cron-Job SUPABASE_SERVICE_ROLE_KEY) als Vercel Env Vars setzen.
+--
+-- Gefahrlos erneut ausführbar: Tabellen nutzen "if not exists", Policies
+-- werden vor dem Neuanlegen per "drop policy if exists" entfernt, Funktionen
+-- per "create or replace" ersetzt und die Seed-Daten per "on conflict do
+-- nothing" übersprungen. Du kannst dieses komplette Skript also jederzeit
+-- erneut in den SQL-Editor einfügen und ausführen, z.B. nach einem Update.
 
 create extension if not exists "pgcrypto";
 
@@ -17,12 +23,15 @@ create table if not exists profiles (
 
 alter table profiles enable row level security;
 
+drop policy if exists "Profiles sind für angemeldete Nutzer lesbar" on profiles;
 create policy "Profiles sind für angemeldete Nutzer lesbar"
   on profiles for select using (auth.role() = 'authenticated');
 
+drop policy if exists "Nutzer können ihr eigenes Profil bearbeiten" on profiles;
 create policy "Nutzer können ihr eigenes Profil bearbeiten"
   on profiles for update using (auth.uid() = id);
 
+drop policy if exists "Nutzer können ihr eigenes Profil anlegen" on profiles;
 create policy "Nutzer können ihr eigenes Profil anlegen"
   on profiles for insert with check (auth.uid() = id);
 
@@ -46,19 +55,23 @@ create table if not exists group_members (
 alter table groups enable row level security;
 alter table group_members enable row level security;
 
+drop policy if exists "Mitglieder sehen ihre Gruppen" on groups;
 create policy "Mitglieder sehen ihre Gruppen"
   on groups for select using (
     exists (select 1 from group_members gm where gm.group_id = id and gm.user_id = auth.uid())
   );
 
+drop policy if exists "Nutzer können Gruppen erstellen" on groups;
 create policy "Nutzer können Gruppen erstellen"
   on groups for insert with check (auth.uid() = owner_id);
 
+drop policy if exists "Mitgliedschaften sind für Gruppenmitglieder sichtbar" on group_members;
 create policy "Mitgliedschaften sind für Gruppenmitglieder sichtbar"
   on group_members for select using (
     exists (select 1 from group_members gm where gm.group_id = group_members.group_id and gm.user_id = auth.uid())
   );
 
+drop policy if exists "Nutzer können Gruppen beitreten" on group_members;
 create policy "Nutzer können Gruppen beitreten"
   on group_members for insert with check (auth.uid() = user_id);
 
@@ -91,8 +104,11 @@ create table if not exists challenges (
 alter table categories enable row level security;
 alter table challenges enable row level security;
 
+drop policy if exists "Kategorien sind öffentlich lesbar" on categories;
 create policy "Kategorien sind öffentlich lesbar" on categories for select using (true);
+drop policy if exists "Challenges sind öffentlich lesbar" on challenges;
 create policy "Challenges sind öffentlich lesbar" on challenges for select using (true);
+drop policy if exists "Angemeldete Nutzer können eigene Challenges anlegen" on challenges;
 create policy "Angemeldete Nutzer können eigene Challenges anlegen"
   on challenges for insert with check (auth.role() = 'authenticated');
 
@@ -119,16 +135,19 @@ create table if not exists event_challenges (
 alter table events enable row level security;
 alter table event_challenges enable row level security;
 
+drop policy if exists "Mitglieder sehen Events ihrer Gruppe" on events;
 create policy "Mitglieder sehen Events ihrer Gruppe"
   on events for select using (
     exists (select 1 from group_members gm where gm.group_id = events.group_id and gm.user_id = auth.uid())
   );
 
+drop policy if exists "Mitglieder können Events erstellen" on events;
 create policy "Mitglieder können Events erstellen"
   on events for insert with check (
     exists (select 1 from group_members gm where gm.group_id = events.group_id and gm.user_id = auth.uid())
   );
 
+drop policy if exists "Mitglieder sehen Event-Challenges" on event_challenges;
 create policy "Mitglieder sehen Event-Challenges"
   on event_challenges for select using (
     exists (
@@ -138,6 +157,7 @@ create policy "Mitglieder sehen Event-Challenges"
     )
   );
 
+drop policy if exists "Mitglieder können Event-Challenges hinzufügen" on event_challenges;
 create policy "Mitglieder können Event-Challenges hinzufügen"
   on event_challenges for insert with check (
     exists (
@@ -172,6 +192,7 @@ create table if not exists votes (
 alter table submissions enable row level security;
 alter table votes enable row level security;
 
+drop policy if exists "Mitglieder sehen Submissions ihrer Gruppe" on submissions;
 create policy "Mitglieder sehen Submissions ihrer Gruppe"
   on submissions for select using (
     exists (
@@ -181,9 +202,11 @@ create policy "Mitglieder sehen Submissions ihrer Gruppe"
     )
   );
 
+drop policy if exists "Nutzer können eigene Submissions anlegen" on submissions;
 create policy "Nutzer können eigene Submissions anlegen"
   on submissions for insert with check (auth.uid() = user_id);
 
+drop policy if exists "Mitglieder sehen Votes ihrer Gruppe" on votes;
 create policy "Mitglieder sehen Votes ihrer Gruppe"
   on votes for select using (
     exists (
@@ -194,6 +217,7 @@ create policy "Mitglieder sehen Votes ihrer Gruppe"
     )
   );
 
+drop policy if exists "Mitglieder können abstimmen" on votes;
 create policy "Mitglieder können abstimmen"
   on votes for insert with check (auth.uid() = voter_id);
 
@@ -202,9 +226,11 @@ insert into storage.buckets (id, name, public)
 values ('proofs', 'proofs', true)
 on conflict (id) do nothing;
 
+drop policy if exists "Beweise sind öffentlich lesbar" on storage.objects;
 create policy "Beweise sind öffentlich lesbar"
   on storage.objects for select using (bucket_id = 'proofs');
 
+drop policy if exists "Angemeldete Nutzer können Beweise hochladen" on storage.objects;
 create policy "Angemeldete Nutzer können Beweise hochladen"
   on storage.objects for insert with check (bucket_id = 'proofs' and auth.role() = 'authenticated');
 
@@ -256,6 +282,54 @@ $$;
 
 revoke all on function join_group_by_code(text) from public;
 grant execute on function join_group_by_code(text) to authenticated;
+
+-- ---------- Gruppe erstellen (Security Definer) ----------
+-- Gleiches Henne-Ei-Problem wie beim Beitreten, nur beim Anlegen: die
+-- "groups"-SELECT-Policy verlangt eine group_members-Zeile, die es beim
+-- INSERT selbst noch nicht gibt. Ohne diese Funktion würde ein direktes
+-- `insert ... select()` aus dem Client zwar die Zeile anlegen (WITH CHECK
+-- owner_id = auth.uid() ist erfüllt), aber beim Zurückliefern der neu
+-- angelegten Zeile (RETURNING wird in Postgres RLS wie ein SELECT
+-- behandelt) an genau dieser SELECT-Policy scheitern – der Client bekommt
+-- dann "0 rows" statt der neuen Gruppe, obwohl sie in Wahrheit angelegt
+-- wurde. Gruppe + Erstmitgliedschaft laufen deshalb atomar hier, danach
+-- ist die SELECT-Policy erfüllt.
+create or replace function create_group(p_name text, p_emoji text)
+returns groups
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_group groups;
+  v_invite_code text;
+  v_attempts int := 0;
+begin
+  loop
+    v_invite_code := upper(substr(md5(random()::text || clock_timestamp()::text), 1, 6));
+    begin
+      insert into groups (name, emoji, invite_code, owner_id)
+      values (p_name, p_emoji, v_invite_code, auth.uid())
+      returning * into v_group;
+      exit;
+    exception when unique_violation then
+      v_attempts := v_attempts + 1;
+      if v_attempts > 5 then
+        raise exception 'invite_code_generation_failed';
+      end if;
+    end;
+  end loop;
+
+  insert into group_members (group_id, user_id)
+  values (v_group.id, auth.uid())
+  on conflict (group_id, user_id) do nothing;
+
+  return v_group;
+end;
+$$;
+
+revoke all on function create_group(text, text) from public;
+grant execute on function create_group(text, text) to authenticated;
 
 -- ---------- Abstimmen (Security Definer) ----------
 -- Stimme + Quorum-Auswertung + Status-Update laufen atomar in einer
