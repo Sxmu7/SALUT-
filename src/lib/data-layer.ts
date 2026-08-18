@@ -73,6 +73,28 @@ export async function listGroupMembers(groupId: string): Promise<Profile[]> {
   return isRemoteMode() ? remote.listGroupMembers(groupId) : local.listGroupMembers(groupId);
 }
 
+export async function leaveGroup(groupId: string): Promise<void> {
+  return isRemoteMode() ? remote.leaveGroup(groupId) : local.leaveGroup(groupId);
+}
+
+export async function kickGroupMember(groupId: string, userId: string): Promise<void> {
+  return isRemoteMode()
+    ? remote.kickGroupMember(groupId, userId)
+    : local.kickGroupMember(groupId, userId);
+}
+
+export async function deleteGroup(groupId: string): Promise<void> {
+  return isRemoteMode() ? remote.deleteGroup(groupId) : local.deleteGroup(groupId);
+}
+
+/** Live-Updates für Gruppen/Mitgliedschaften (Beitritte, Austritte,
+ * Löschungen anderer Mitglieder). Im Demo-Modus No-Op, da dort ohnehin
+ * nur ein Gerät existiert. */
+export function subscribeToGroups(onChange: () => void): () => void {
+  if (!isRemoteMode()) return () => {};
+  return remote.subscribeToGroups(onChange);
+}
+
 export async function listAllChallenges(): Promise<Challenge[]> {
   return isRemoteMode() ? remote.listAllChallenges() : local.listAllChallenges();
 }

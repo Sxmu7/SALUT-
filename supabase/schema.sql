@@ -357,6 +357,106 @@ $$;
 revoke all on function create_group(text, text) from public;
 grant execute on function create_group(text, text) to authenticated;
 
+-- ---------- Gruppe verlassen (Security Definer) ----------
+-- Jedes Mitglied kann seine eigene Mitgliedschaft beenden. Ausnahme: der
+-- Ersteller kann nicht "einfach verlassen", solange noch andere Mitglieder
+-- da sind (sonst gäbe es eine Gruppe ohne gültigen Owner) - er muss dann
+-- entweder die Gruppe komplett löschen oder erst alle anderen entfernen.
+-- Ist der Ersteller das letzte verbleibende Mitglied, entspricht "verlassen"
+-- ohnehin einem Löschen der ganzen Gruppe, das übernimmt diese Funktion
+-- dann gleich mit.
+create or replace function leave_group(p_group_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_owner_id uuid;
+  v_member_count int;
+begin
+  select owner_id into v_owner_id from groups where id = p_group_id;
+  if v_owner_id is null then
+    raise exception 'group_not_found';
+  end if;
+
+  if not exists (
+    select 1 from group_members where group_id = p_group_id and user_id = auth.uid()
+  ) then
+    raise exception 'not_a_member';
+  end if;
+
+  if auth.uid() = v_owner_id then
+    select count(*) into v_member_count from group_members where group_id = p_group_id;
+    if v_member_count > 1 then
+      raise exception 'owner_must_delete_or_remove_members_first';
+    end if;
+    delete from groups where id = p_group_id;
+    return;
+  end if;
+
+  delete from group_members where group_id = p_group_id and user_id = auth.uid();
+end;
+$$;
+
+revoke all on function leave_group(uuid) from public;
+grant execute on function leave_group(uuid) to authenticated;
+
+-- ---------- Mitglied entfernen (Security Definer) ----------
+-- Nur der Ersteller darf jemanden entfernen, und nicht sich selbst (dafür
+-- gibt es leave_group()/delete_group()) - beides wird serverseitig
+-- geprüft, ein Client kann diese Regeln nicht umgehen.
+create or replace function kick_group_member(p_group_id uuid, p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_owner_id uuid;
+begin
+  select owner_id into v_owner_id from groups where id = p_group_id;
+  if v_owner_id is null then
+    raise exception 'group_not_found';
+  end if;
+  if auth.uid() <> v_owner_id then
+    raise exception 'only_owner_can_remove_members';
+  end if;
+  if p_user_id = v_owner_id then
+    raise exception 'cannot_remove_owner';
+  end if;
+
+  delete from group_members where group_id = p_group_id and user_id = p_user_id;
+end;
+$$;
+
+revoke all on function kick_group_member(uuid, uuid) from public;
+grant execute on function kick_group_member(uuid, uuid) to authenticated;
+
+-- ---------- Gruppe komplett löschen (Security Definer) ----------
+-- Nur der Ersteller. Löscht via "on delete cascade" automatisch auch
+-- group_members, events, event_challenges, submissions, votes und (falls
+-- genutzt) die Push-/Bingo-Tabellen dieser Gruppe mit.
+create or replace function delete_group(p_group_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from groups where id = p_group_id and owner_id = auth.uid()
+  ) then
+    raise exception 'only_owner_can_delete_group';
+  end if;
+
+  delete from groups where id = p_group_id;
+end;
+$$;
+
+revoke all on function delete_group(uuid) from public;
+grant execute on function delete_group(uuid) to authenticated;
+
 -- ---------- Abstimmen (Security Definer) ----------
 -- Stimme + Quorum-Auswertung + Status-Update laufen atomar in einer
 -- Funktion. Das verhindert Race Conditions, wenn mehrere Mitspieler auf
@@ -1330,6 +1430,39 @@ $$;
 
 revoke all on function finish_party_bingo(uuid) from public;
 grant execute on function finish_party_bingo(uuid) to authenticated;
+
+-- ==================== Realtime ====================
+-- Supabase legt pro Projekt eine Publikation "supabase_realtime" an, über
+-- die postgres_changes-Events laufen - Tabellen sind darin aber NICHT
+-- automatisch enthalten, das muss man entweder im Dashboard (Table
+-- Editor -> Tabelle -> "Enable Realtime") oder per SQL einschalten. Ohne
+-- das hier landen weder App-eigene subscribeTo...()-Aufrufe noch die im
+-- Dashboard zugeschalteten Toggles irgendwelche Events beim Client - "die
+-- App synchronisiert nicht live" ist ohne diesen Block der wahrscheinlichste
+-- Grund. Der DO-Block prüft vorher, ob die Tabelle schon drin ist, damit
+-- dieses Skript weiterhin beliebig oft wiederholbar bleibt (ein "alter
+-- publication ... add table" auf eine schon enthaltene Tabelle würde sonst
+-- mit einem Fehler abbrechen).
+do $$
+declare
+  v_table text;
+begin
+  -- Publikation existiert nicht (z.B. ein lokaler Test-Postgres ohne
+  -- Supabase-Bootstrap) -> nichts zu tun, kein Fehler.
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    return;
+  end if;
+
+  foreach v_table in array array['group_members', 'groups', 'submissions', 'votes', 'party_bingo', 'party_bingo_events']
+  loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = v_table
+    ) then
+      execute format('alter publication supabase_realtime add table %I', v_table);
+    end if;
+  end loop;
+end $$;
 
 -- ---------- Scheduler: pg_cron ruft die Edge Function jede Minute auf ----------
 -- EINMALIG nach dem Deployen der Edge Function auszuführen (siehe

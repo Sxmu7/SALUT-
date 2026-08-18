@@ -6,6 +6,10 @@ import {
   listGroupMembers,
   createGroup,
   joinGroupByCode,
+  leaveGroup,
+  kickGroupMember,
+  deleteGroup,
+  subscribeToGroups,
 } from "@/lib/data-layer";
 import { Group, Profile } from "@/types";
 
@@ -41,6 +45,16 @@ export function useGroups() {
     };
   }, [refresh]);
 
+  // Live-Updates: tritt jemand bei, verlässt die Gruppe oder wird
+  // entfernt, sehen alle Mitglieder das jetzt automatisch, ohne die App
+  // neu laden zu müssen (siehe subscribeToGroups() in data-layer.ts).
+  useEffect(() => {
+    const unsubscribe = subscribeToGroups(() => {
+      refresh();
+    });
+    return unsubscribe;
+  }, [refresh]);
+
   const create = useCallback(
     async (name: string, emoji: string) => {
       const g = await createGroup(name, emoji);
@@ -59,7 +73,31 @@ export function useGroups() {
     [refresh]
   );
 
-  return { groups, ready, error, refresh, create, join };
+  const leave = useCallback(
+    async (groupId: string) => {
+      await leaveGroup(groupId);
+      await refresh();
+    },
+    [refresh]
+  );
+
+  const kick = useCallback(
+    async (groupId: string, userId: string) => {
+      await kickGroupMember(groupId, userId);
+      await refresh();
+    },
+    [refresh]
+  );
+
+  const destroy = useCallback(
+    async (groupId: string) => {
+      await deleteGroup(groupId);
+      await refresh();
+    },
+    [refresh]
+  );
+
+  return { groups, ready, error, refresh, create, join, leave, kick, destroy };
 }
 
 /** Die primäre (erste) Gruppe des Nutzers samt Mitgliedern – für Dashboard & Co. */
@@ -95,6 +133,13 @@ export function usePrimaryGroup() {
     return () => {
       cancelled = true;
     };
+  }, [refresh]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToGroups(() => {
+      refresh();
+    });
+    return unsubscribe;
   }, [refresh]);
 
   return { group, members, ready, error, refresh };

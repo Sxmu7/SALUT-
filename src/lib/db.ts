@@ -159,6 +159,67 @@ export function listGroupMembers(groupId: string): Profile[] {
     .filter((p): p is Profile => Boolean(p));
 }
 
+/** Spiegelt die leave_group()-RPC im Remote-Modus: der Ersteller kann
+ * nicht einfach verlassen, solange noch andere Mitglieder da sind - ist
+ * er das letzte Mitglied, wird die Gruppe stattdessen ganz entfernt. */
+export function leaveGroup(groupId: string): void {
+  const profile = getCurrentProfile();
+  if (!profile) throw new Error("Kein Profil vorhanden.");
+  const groups = listGroups();
+  const idx = groups.findIndex((g) => g.id === groupId);
+  if (idx === -1) throw new Error("Gruppe nicht gefunden.");
+  const group = groups[idx];
+  if (!group.memberIds.includes(profile.id)) throw new Error("Du bist kein Mitglied dieser Gruppe.");
+
+  if (group.ownerId === profile.id) {
+    const others = group.memberIds.filter((id) => id !== profile.id);
+    if (others.length > 0) {
+      throw new Error(
+        "Als Ersteller musst du die Gruppe erst löschen oder alle anderen Mitglieder entfernen, bevor du sie verlassen kannst."
+      );
+    }
+    writeLS(LS_KEYS.groups, groups.filter((g) => g.id !== groupId));
+    return;
+  }
+
+  groups[idx] = { ...group, memberIds: group.memberIds.filter((id) => id !== profile.id) };
+  writeLS(LS_KEYS.groups, groups);
+}
+
+/** Spiegelt die kick_group_member()-RPC: nur der Ersteller darf, und
+ * niemand kann den Ersteller selbst entfernen. */
+export function kickGroupMember(groupId: string, userId: string): void {
+  const profile = getCurrentProfile();
+  if (!profile) throw new Error("Kein Profil vorhanden.");
+  const groups = listGroups();
+  const idx = groups.findIndex((g) => g.id === groupId);
+  if (idx === -1) throw new Error("Gruppe nicht gefunden.");
+  const group = groups[idx];
+  if (group.ownerId !== profile.id) throw new Error("Nur der Ersteller kann Mitglieder entfernen.");
+  if (userId === group.ownerId) throw new Error("Der Ersteller kann nicht entfernt werden.");
+
+  groups[idx] = { ...group, memberIds: group.memberIds.filter((id) => id !== userId) };
+  writeLS(LS_KEYS.groups, groups);
+}
+
+/** Spiegelt die delete_group()-RPC: nur der Ersteller. */
+export function deleteGroup(groupId: string): void {
+  const profile = getCurrentProfile();
+  if (!profile) throw new Error("Kein Profil vorhanden.");
+  const groups = listGroups();
+  const group = groups.find((g) => g.id === groupId);
+  if (!group) throw new Error("Gruppe nicht gefunden.");
+  if (group.ownerId !== profile.id) throw new Error("Nur der Ersteller kann die Gruppe löschen.");
+
+  writeLS(LS_KEYS.groups, groups.filter((g) => g.id !== groupId));
+}
+
+/** Kein Server, kein Realtime im lokalen Demo-Modus - No-Op-Unsubscribe,
+ * damit Aufrufer nicht unterscheiden müssen. */
+export function subscribeToGroups(): () => void {
+  return () => {};
+}
+
 // ---------------------------- Challenges ----------------------------
 
 export function listAllChallenges(): Challenge[] {

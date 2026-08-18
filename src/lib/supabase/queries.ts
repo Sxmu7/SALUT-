@@ -292,6 +292,58 @@ export async function listGroupMembers(groupId: string): Promise<Profile[]> {
     .map(mapProfileRow);
 }
 
+/** Nutzt die leave_group()-RPC (siehe schema.sql) – der Ersteller kann so
+ * nicht "einfach verlassen", solange noch andere Mitglieder da sind (die
+ * Funktion wirft dann einen klaren Fehler statt die Gruppe ownerlos zu
+ * hinterlassen). */
+export async function leaveGroup(groupId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { error } = await supabase.rpc("leave_group", { p_group_id: groupId });
+  if (error) raise(error);
+}
+
+/** Nutzt die kick_group_member()-RPC – prüft serverseitig, dass nur der
+ * Ersteller entfernen darf und dass niemand den Ersteller selbst
+ * rauswirft. */
+export async function kickGroupMember(groupId: string, userId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { error } = await supabase.rpc("kick_group_member", {
+    p_group_id: groupId,
+    p_user_id: userId,
+  });
+  if (error) raise(error);
+}
+
+/** Nutzt die delete_group()-RPC – löscht per ON DELETE CASCADE auch alle
+ * Events/Submissions/Votes/Push-/Bingo-Daten dieser Gruppe mit. */
+export async function deleteGroup(groupId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { error } = await supabase.rpc("delete_group", { p_group_id: groupId });
+  if (error) raise(error);
+}
+
+/** Live-Updates für die eigenen Gruppen/Mitgliedschaften. Reagiert
+ * bewusst breit (keine Filterung auf eine einzelne Gruppen-ID) auf JEDE
+ * Änderung an group_members/groups und löst dann einfach einen kompletten
+ * Refetch beim Aufrufer aus (spiegelt subscribeToSubmission) – RLS sorgt
+ * weiterhin dafür, dass beim Refetch nur die eigenen Gruppen ankommen.
+ * Damit sehen andere Mitglieder Beitritte/Austritte/Löschungen live,
+ * ohne dass die App manuell neu geladen werden muss. */
+export function subscribeToGroups(onChange: () => void): () => void {
+  const supabase = getSupabaseClient();
+  const channel = supabase
+    .channel("groups-sync")
+    .on("postgres_changes", { event: "*", schema: "public", table: "group_members" }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "groups" }, onChange)
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
 // ---------------------------- Challenges ----------------------------
 // Das feste Grundset bleibt bewusst eine statische, identische Konstante
 // auf jedem Client (kein DB-Roundtrip nötig) – nur nutzerangelegte/KI-
