@@ -30,7 +30,7 @@ import {
   BingoWinCondition,
 } from "@/types";
 import { CHALLENGES } from "@/lib/data/challenges";
-import { isTodayBirthday, uid } from "@/lib/utils";
+import { isTodayBirthday, parseLocalDate, uid } from "@/lib/utils";
 import { getSupabaseClient } from "./client";
 import { ensureSupabaseUser } from "./auth";
 
@@ -90,19 +90,22 @@ function mapChallengeRow(row: Record<string, unknown>): Challenge {
   };
 }
 
-async function mapGroupRow(row: Record<string, unknown>): Promise<Group> {
-  const supabase = getSupabaseClient();
-  const { data: members } = await supabase
-    .from("group_members")
-    .select("user_id")
-    .eq("group_id", row.id as string);
+// Bewusst SYNCHRON und ohne eigenen Query mehr: früher hat diese Funktion
+// pro Gruppe eine zusätzliche "group_members"-Abfrage nur für die
+// User-IDs gemacht (klassisches N+1 – bei z.B. 3 Gruppen also 3
+// zusätzliche, seriell mitgezählte Round-Trips beim Laden von "Freunde"
+// bzw. beim Dashboard-Start). memberIds wird im Remote-Modus nirgendwo
+// gelesen (nur lib/db.ts im lokalen Demo-Modus nutzt es) – volle Profile
+// der Mitglieder kommen ohnehin separat über listGroupMembers(). Deshalb
+// hier einfach leer lassen, statt Daten zu laden, die nie gebraucht werden.
+function mapGroupRow(row: Record<string, unknown>): Group {
   return {
     id: row.id as string,
     name: row.name as string,
     emoji: row.emoji as string,
     inviteCode: row.invite_code as string,
     ownerId: row.owner_id as string,
-    memberIds: (members ?? []).map((m: { user_id: string }) => m.user_id),
+    memberIds: [],
     createdAt: row.created_at as string,
   };
 }
@@ -245,7 +248,7 @@ export async function listGroups(): Promise<Group[]> {
   const rows = data
     .map((row: { groups: Record<string, unknown> | null }) => row.groups)
     .filter((g: Record<string, unknown> | null): g is Record<string, unknown> => Boolean(g));
-  return Promise.all(rows.map(mapGroupRow));
+  return rows.map(mapGroupRow);
 }
 
 /** Nutzt die create_group()-RPC (siehe schema.sql) – ein direktes INSERT +
@@ -554,16 +557,18 @@ export async function getNextHighlight(groupId: string): Promise<{
   const now = new Date();
   const candidates: { date: Date; label: string; emoji: string; eventId?: string }[] = [];
 
-  const events = await listEvents(groupId);
+  // Beide Abfragen sind unabhängig voneinander (Events der Gruppe vs.
+  // Geburtstage der Mitglieder) – parallel statt nacheinander laden
+  // spart einen kompletten Round-Trip beim Dashboard-Start.
+  const [events, members] = await Promise.all([listEvents(groupId), listGroupMembers(groupId)]);
   for (const e of events) {
     if (e.status === "finished") continue;
     candidates.push({ date: new Date(e.eventDate), label: e.title, emoji: e.emoji, eventId: e.id });
   }
 
-  const members = await listGroupMembers(groupId);
   for (const member of members) {
     if (!member.birthday) continue;
-    const bday = new Date(member.birthday);
+    const bday = parseLocalDate(member.birthday);
     let next = new Date(now.getFullYear(), bday.getMonth(), bday.getDate());
     if (next < new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
       next = new Date(now.getFullYear() + 1, bday.getMonth(), bday.getDate());

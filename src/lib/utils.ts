@@ -17,9 +17,29 @@ export function randomInviteCode(length = 6): string {
   return out;
 }
 
+// WICHTIG: `new Date("YYYY-MM-DD")` (reines Datum ohne Uhrzeit) wird laut
+// JS-Spezifikation als UTC-Mitternacht geparst – alle Getter hier
+// (getMonth/getDate/getFullYear) lesen das Ergebnis aber in der LOKALEN
+// Zeitzone. Das führt je nach Zeitzone zu einer Verschiebung um einen Tag
+// (z.B. Geburtstag "17.08." wird für Nutzer westlich von UTC als "16.08."
+// angezeigt/berechnet). Für reine Datums-Strings (wie sie das
+// Geburtstags-Feld liefert) wird deshalb hier manuell Jahr/Monat/Tag
+// zerlegt und über den LOKALEN Date-Konstruktor gebaut – der ist
+// zeitzonen-eindeutig. Volle ISO-Zeitstempel (mit Uhrzeit/Z, z.B.
+// event_date) sind davon nicht betroffen und laufen unverändert über
+// new Date().
+export function parseLocalDate(dateISO: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateISO);
+  if (match) {
+    const [, y, m, d] = match;
+    return new Date(Number(y), Number(m) - 1, Number(d));
+  }
+  return new Date(dateISO);
+}
+
 export function daysUntil(dateISO: string): number {
   const now = new Date();
-  const target = new Date(dateISO);
+  const target = parseLocalDate(dateISO);
   const startOfNow = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfTarget = new Date(
     target.getFullYear(),
@@ -32,7 +52,7 @@ export function daysUntil(dateISO: string): number {
 
 /** Nächstes Datum, an dem der Geburtstag (MM-DD) auftritt, ab heute. */
 export function nextBirthdayDate(birthdayISO: string): Date {
-  const bday = new Date(birthdayISO);
+  const bday = parseLocalDate(birthdayISO);
   const now = new Date();
   let next = new Date(now.getFullYear(), bday.getMonth(), bday.getDate());
   const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -43,19 +63,19 @@ export function nextBirthdayDate(birthdayISO: string): Date {
 }
 
 export function ageOnNextBirthday(birthdayISO: string): number {
-  const bday = new Date(birthdayISO);
+  const bday = parseLocalDate(birthdayISO);
   const next = nextBirthdayDate(birthdayISO);
   return next.getFullYear() - bday.getFullYear();
 }
 
 export function isTodayBirthday(birthdayISO: string): boolean {
-  const bday = new Date(birthdayISO);
+  const bday = parseLocalDate(birthdayISO);
   const now = new Date();
   return bday.getMonth() === now.getMonth() && bday.getDate() === now.getDate();
 }
 
 export function formatDate(dateISO: string): string {
-  return new Date(dateISO).toLocaleDateString("de-DE", {
+  return parseLocalDate(dateISO).toLocaleDateString("de-DE", {
     day: "2-digit",
     month: "long",
     year: "numeric",
@@ -63,7 +83,7 @@ export function formatDate(dateISO: string): string {
 }
 
 export function formatDateShort(dateISO: string): string {
-  return new Date(dateISO).toLocaleDateString("de-DE", {
+  return parseLocalDate(dateISO).toLocaleDateString("de-DE", {
     day: "2-digit",
     month: "short",
   });

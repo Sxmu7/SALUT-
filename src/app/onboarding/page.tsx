@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
+import { BirthdayPicker } from "@/components/ui/BirthdayPicker";
 import { LogoMark } from "@/components/brand/Logo";
 import { createOrUpdateProfile } from "@/lib/data-layer";
 import { AVATAR_EMOJIS } from "@/lib/utils";
@@ -179,12 +180,7 @@ export default function OnboardingPage() {
               Salut! merkt sich dein Datum und startet an deinem Ehrentag
               automatisch einen Abend mit exklusiven Challenges für deine Crew.
             </p>
-            <input
-              type="date"
-              value={birthday}
-              onChange={(e) => setBirthday(e.target.value)}
-              className="w-full mt-8 card-surface rounded-2xl px-5 py-4 text-lg font-medium"
-            />
+            <BirthdayPicker value={birthday} onChange={setBirthday} className="mt-8" />
             <p className="text-muted text-xs mt-3">
               Optional – du kannst das später jederzeit im Profil ändern.
             </p>

@@ -13,10 +13,22 @@ import {
 } from "@/lib/data-layer";
 import { Group, Profile } from "@/types";
 
+// Gleicher Modul-Cache-Trick wie in useProfile.ts: verhindert, dass jede
+// Rückkehr zur "Freunde"-Seite oder zum Dashboard wieder bei null/[]
+// startet und das Skeleton neu zeigt, obwohl die Daten Sekunden vorher
+// schon geladen waren. Erster Ladevorgang pro Tab zeigt weiterhin normal
+// das Skeleton; danach zeigen Revisits sofort den letzten Stand und
+// aktualisieren still im Hintergrund.
+let cachedGroups: Group[] = [];
+let hasLoadedGroupsOnce = false;
+let cachedPrimaryGroup: Group | null = null;
+let cachedPrimaryMembers: Profile[] = [];
+let hasLoadedPrimaryOnce = false;
+
 /** Alle Gruppen/Crews des aktuellen Nutzers ("Freunde"-Tab). */
 export function useGroups() {
-  const [groups, setGroups] = useState<Group[]>([]);
-  const [ready, setReady] = useState(false);
+  const [groups, setGroups] = useState<Group[]>(cachedGroups);
+  const [ready, setReady] = useState(hasLoadedGroupsOnce);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -25,7 +37,10 @@ export function useGroups() {
     // nie true werden und die Seite für immer im Skeleton hängen bleiben,
     // wie schon bei den anderen "stuck forever"-Bugs in dieser Session.
     try {
-      setGroups(await listGroups());
+      const g = await listGroups();
+      cachedGroups = g;
+      hasLoadedGroupsOnce = true;
+      setGroups(g);
       setError(null);
     } catch (err) {
       setError(
@@ -102,9 +117,9 @@ export function useGroups() {
 
 /** Die primäre (erste) Gruppe des Nutzers samt Mitgliedern – für Dashboard & Co. */
 export function usePrimaryGroup() {
-  const [group, setGroup] = useState<Group | null>(null);
-  const [members, setMembers] = useState<Profile[]>([]);
-  const [ready, setReady] = useState(false);
+  const [group, setGroup] = useState<Group | null>(cachedPrimaryGroup);
+  const [members, setMembers] = useState<Profile[]>(cachedPrimaryMembers);
+  const [ready, setReady] = useState(hasLoadedPrimaryOnce);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -114,8 +129,12 @@ export function usePrimaryGroup() {
     try {
       const groups = await listGroups();
       const g = groups[0] ?? null;
+      const m = g ? await listGroupMembers(g.id) : [];
+      cachedPrimaryGroup = g;
+      cachedPrimaryMembers = m;
+      hasLoadedPrimaryOnce = true;
       setGroup(g);
-      setMembers(g ? await listGroupMembers(g.id) : []);
+      setMembers(m);
       setError(null);
     } catch (err) {
       setError(

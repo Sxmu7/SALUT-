@@ -15,6 +15,7 @@ import {
   uid,
   randomInviteCode,
   isTodayBirthday,
+  parseLocalDate,
   AVATAR_EMOJIS,
 } from "@/lib/utils";
 
@@ -406,7 +407,7 @@ export function getNextHighlight(groupId: string): {
 
   for (const member of listGroupMembers(groupId)) {
     if (!member.birthday) continue;
-    const bday = new Date(member.birthday);
+    const bday = parseLocalDate(member.birthday);
     let next = new Date(now.getFullYear(), bday.getMonth(), bday.getDate());
     if (next < new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
       next = new Date(now.getFullYear() + 1, bday.getMonth(), bday.getDate());

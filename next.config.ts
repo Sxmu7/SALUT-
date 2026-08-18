@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Der Next.js-Dev-Indikator ("N"-Badge) sitzt standardmäßig unten links –
+  // exakt dort, wo die App ihren eigenen "Home"-Tab in der unteren
+  // Navigation hat. Er fängt dort Klicks ab, obwohl er visuell kaum stört.
+  // Nur im Dev-Modus relevant, hat keinen Effekt auf den Produktions-Build.
+  devIndicators: false,
   experimental: {
     // Fast alle Seiten (Dashboard, Gruppen, Profil, Ranking, ...) sind
     // reine Client-Components, die ihre Daten per useEffect aus dem

@@ -7,6 +7,7 @@ import { TopBar } from "@/components/layout/TopBar";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
+import { BirthdayPicker } from "@/components/ui/BirthdayPicker";
 import { TopBarSkeleton, CardSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { useProfile } from "@/hooks/useProfile";
 import { usePrimaryGroup } from "@/hooks/useGroups";
@@ -122,12 +123,7 @@ export default function ProfilePage() {
 
         <Card>
           <label className="text-xs font-semibold text-muted uppercase">Geburtstag</label>
-          <input
-            type="date"
-            value={birthday}
-            onChange={(e) => setBirthday(e.target.value)}
-            className="w-full bg-transparent border-b border-white/10 py-2.5 mt-1 font-medium focus:border-[#BF5AF2] transition-colors"
-          />
+          <BirthdayPicker value={birthday} onChange={setBirthday} className="mt-2" />
           {birthday && (
             <p className="text-muted text-xs mt-2">
               🎂 In {ageOnNextBirthday(birthday)} Jahren wird automatisch dein
