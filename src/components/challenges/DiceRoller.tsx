@@ -19,6 +19,7 @@ export function DiceRoller({ eventId }: { eventId: string }) {
   // gespielt ist und pickChallengeForEvent auf eine andere ausweicht –
   // das soll sichtbar sein statt sich wie ein Bug anzufühlen.
   const [fallback, setFallback] = useState<{ from: CategoryId; to: CategoryId } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const category = revealedCategoryId ? getCategory(revealedCategoryId) : null;
@@ -28,6 +29,7 @@ export function DiceRoller({ eventId }: { eventId: string }) {
     setRolling(true);
     setEmpty(false);
     setFallback(null);
+    setError(null);
 
     const ticks = 10;
     for (let i = 0; i < ticks; i++) {
@@ -44,29 +46,38 @@ export function DiceRoller({ eventId }: { eventId: string }) {
       setRevealedCategoryId(rolledCategoryId);
 
       const revealDelay = setTimeout(async () => {
-        const challenge = await pickChallengeForEvent(eventId, rolledCategoryId);
-        if (!challenge) {
-          setEmpty(true);
+        try {
+          const challenge = await pickChallengeForEvent(eventId, rolledCategoryId);
+          if (!challenge) {
+            setEmpty(true);
+            setRolling(false);
+            return;
+          }
+
+          const isFallback = challenge.categoryId !== rolledCategoryId;
+          if (isFallback) {
+            setRevealedCategoryId(challenge.categoryId);
+            setFallback({ from: rolledCategoryId, to: challenge.categoryId });
+          }
+
+          await addChallengeToEvent(eventId, challenge.id);
+          const navDelay = setTimeout(
+            () => {
+              router.push(`/events/${eventId}/challenges/${challenge.id}`);
+            },
+            // Bei Fallback bleibt der Hinweistext etwas länger sichtbar,
+            // bevor wir weiterspringen.
+            isFallback ? 1400 : 550
+          );
+          timeoutsRef.current.push(navDelay);
+        } catch (err) {
+          // Ohne dieses catch blieb der Button bei einem Fehler (z.B.
+          // Supabase nicht erreichbar) für immer auf "Würfelt…" hängen.
+          setError(
+            err instanceof Error ? err.message : "Würfeln fehlgeschlagen. Bitte erneut versuchen."
+          );
           setRolling(false);
-          return;
         }
-
-        const isFallback = challenge.categoryId !== rolledCategoryId;
-        if (isFallback) {
-          setRevealedCategoryId(challenge.categoryId);
-          setFallback({ from: rolledCategoryId, to: challenge.categoryId });
-        }
-
-        await addChallengeToEvent(eventId, challenge.id);
-        const navDelay = setTimeout(
-          () => {
-            router.push(`/events/${eventId}/challenges/${challenge.id}`);
-          },
-          // Bei Fallback bleibt der Hinweistext etwas länger sichtbar,
-          // bevor wir weiterspringen.
-          isFallback ? 1400 : 550
-        );
-        timeoutsRef.current.push(navDelay);
       }, 450);
       timeoutsRef.current.push(revealDelay);
     }, ticks * 80);
@@ -129,6 +140,18 @@ export function DiceRoller({ eventId }: { eventId: string }) {
           >
             Für diesen Abend sind schon alle Challenges gespielt – auf zur
             nächsten Party!
+          </motion.p>
+        )}
+
+        {error && (
+          <motion.p
+            key="error"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="text-[#FF453A] text-xs text-center max-w-[260px]"
+          >
+            {error}
           </motion.p>
         )}
       </AnimatePresence>

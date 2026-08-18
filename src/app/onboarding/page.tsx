@@ -48,6 +48,7 @@ export default function OnboardingPage() {
   const [emoji, setEmoji] = useState(AVATAR_EMOJIS[0]);
   const [birthday, setBirthday] = useState("");
   const [finishing, setFinishing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const nameStep = INTRO_STEPS;
   const avatarStep = INTRO_STEPS + 1;
@@ -61,12 +62,26 @@ export default function OnboardingPage() {
 
   async function finish() {
     setFinishing(true);
-    await createOrUpdateProfile({
-      name: name.trim() || "Du",
-      avatarEmoji: emoji,
-      birthday: birthday || null,
-    });
-    router.push("/dashboard");
+    setError(null);
+    try {
+      await createOrUpdateProfile({
+        name: name.trim() || "Du",
+        avatarEmoji: emoji,
+        birthday: birthday || null,
+      });
+      router.push("/dashboard");
+    } catch (err) {
+      // Ohne dieses catch blieb der Button bei einem Supabase-Fehler (z.B.
+      // falsche Project-URL oder Anonymous Sign-in nicht aktiviert) für
+      // immer auf "Wird gespeichert…" hängen, ohne dass sichtbar wurde,
+      // was schiefging.
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Profil konnte nicht gespeichert werden. Bitte erneut versuchen."
+      );
+      setFinishing(false);
+    }
   }
 
   const isIntro = step < INTRO_STEPS;
@@ -176,6 +191,16 @@ export default function OnboardingPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {error && (
+        <motion.p
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-[#FF453A] text-sm text-center mt-6"
+        >
+          {error}
+        </motion.p>
+      )}
 
       <div className="mt-10 flex gap-3">
         {step > 0 && (

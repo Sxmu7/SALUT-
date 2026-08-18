@@ -24,22 +24,31 @@ export default function GroupsPage() {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
 
-  function handleCreate() {
+  async function handleCreate() {
     if (!name.trim()) return;
-    create(name.trim(), emoji);
-    setName("");
-    setMode("none");
+    setError("");
+    try {
+      await create(name.trim(), emoji);
+      setName("");
+      setMode("none");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gruppe konnte nicht erstellt werden.");
+    }
   }
 
-  function handleJoin() {
-    const g = join(code);
-    if (!g) {
-      setError("Code nicht gefunden");
-      return;
-    }
-    setCode("");
+  async function handleJoin() {
     setError("");
-    setMode("none");
+    try {
+      const g = await join(code);
+      if (!g) {
+        setError("Code nicht gefunden");
+        return;
+      }
+      setCode("");
+      setMode("none");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Beitritt fehlgeschlagen.");
+    }
   }
 
   return (

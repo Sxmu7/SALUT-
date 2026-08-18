@@ -39,6 +39,7 @@ export default function ChallengePlayPage({
   const [preview, setPreview] = useState<string | null>(null);
   const [proofType, setProofType] = useState<"photo" | "video" | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [members, setMembers] = useState<Profile[]>([]);
   const celebratedRef = useRef(false);
 
@@ -115,16 +116,24 @@ export default function ChallengePlayPage({
   async function submit(withoutProof = false) {
     if (!profile) return;
     setSubmitting(true);
-    const sub = await submitChallengeProof({
-      eventId: id,
-      challengeId,
-      userId: profile.id,
-      proofDataUrl: withoutProof ? undefined : preview ?? undefined,
-      note: withoutProof ? "Ehrenwort" : undefined,
-    });
-    setSubmission(sub);
-    setSubmitting(false);
-    if (sub.status === "approved") fireConfetti("big");
+    setSubmitError(null);
+    try {
+      const sub = await submitChallengeProof({
+        eventId: id,
+        challengeId,
+        userId: profile.id,
+        proofDataUrl: withoutProof ? undefined : preview ?? undefined,
+        note: withoutProof ? "Ehrenwort" : undefined,
+      });
+      setSubmission(sub);
+      if (sub.status === "approved") fireConfetti("big");
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error ? err.message : "Einreichen fehlgeschlagen. Bitte erneut versuchen."
+      );
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -215,6 +224,10 @@ export default function ChallengePlayPage({
                 <Button fullWidth size="lg" disabled={submitting} onClick={() => submit(true)}>
                   Erledigt – auf Ehrenwort ✅
                 </Button>
+              )}
+
+              {submitError && (
+                <p className="text-[#FF453A] text-xs text-center">{submitError}</p>
               )}
             </motion.div>
           )}
