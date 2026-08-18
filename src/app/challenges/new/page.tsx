@@ -29,6 +29,8 @@ export default function NewChallengePage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [imported, setImported] = useState<Challenge[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function addManual() {
     if (!title.trim()) return;
@@ -45,8 +47,19 @@ export default function NewChallengePage() {
       isCustom: true,
       source: "manual",
     };
-    await addCustomChallenges([challenge]);
-    router.push("/challenges");
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await addCustomChallenges([challenge]);
+      router.push("/challenges");
+    } catch (err) {
+      // Ohne dieses catch passierte bei einem Supabase-Fehler einfach
+      // nichts – kein Redirect, keine Fehlermeldung, der Button wirkte tot.
+      setSaveError(
+        err instanceof Error ? err.message : "Challenge konnte nicht gespeichert werden."
+      );
+      setSaving(false);
+    }
   }
 
   function handleFile(file: File) {
@@ -61,8 +74,17 @@ export default function NewChallengePage() {
 
   async function confirmImport() {
     if (imported.length === 0) return;
-    await addCustomChallenges(imported);
-    router.push("/challenges");
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await addCustomChallenges(imported);
+      router.push("/challenges");
+    } catch (err) {
+      setSaveError(
+        err instanceof Error ? err.message : "Import fehlgeschlagen. Bitte erneut versuchen."
+      );
+      setSaving(false);
+    }
   }
 
   return (
@@ -156,9 +178,12 @@ export default function NewChallengePage() {
                 ))}
               </div>
             </Card>
-            <Button fullWidth size="lg" onClick={addManual}>
-              Challenge hinzufügen
+            <Button fullWidth size="lg" onClick={addManual} disabled={saving}>
+              {saving ? "Wird gespeichert…" : "Challenge hinzufügen"}
             </Button>
+            {saveError && (
+              <p className="text-[#FF453A] text-xs text-center">{saveError}</p>
+            )}
           </div>
         )}
 
@@ -202,9 +227,21 @@ export default function NewChallengePage() {
               </Card>
             )}
 
-            <Button fullWidth size="lg" disabled={imported.length === 0} onClick={confirmImport}>
-              {imported.length > 0 ? `${imported.length} Challenges importieren` : "Datei hochladen"}
+            <Button
+              fullWidth
+              size="lg"
+              disabled={imported.length === 0 || saving}
+              onClick={confirmImport}
+            >
+              {saving
+                ? "Wird importiert…"
+                : imported.length > 0
+                ? `${imported.length} Challenges importieren`
+                : "Datei hochladen"}
             </Button>
+            {saveError && (
+              <p className="text-[#FF453A] text-xs text-center">{saveError}</p>
+            )}
 
             <div className="card-surface rounded-2xl p-4 flex items-center gap-3 opacity-60">
               <span className="text-xl">🤖</span>

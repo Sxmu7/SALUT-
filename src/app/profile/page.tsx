@@ -11,6 +11,7 @@ import { TopBarSkeleton, CardSkeleton, Skeleton } from "@/components/ui/Skeleton
 import { useProfile } from "@/hooks/useProfile";
 import { usePrimaryGroup } from "@/hooks/useGroups";
 import { useRanking } from "@/hooks/useRanking";
+import { isRemoteMode } from "@/lib/data-layer";
 import { AVATAR_EMOJIS, ageOnNextBirthday } from "@/lib/utils";
 
 export default function ProfilePage() {
@@ -20,6 +21,8 @@ export default function ProfilePage() {
   const [name, setName] = useState("");
   const [birthday, setBirthday] = useState("");
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!profile) return;
@@ -29,10 +32,23 @@ export default function ProfilePage() {
 
   const me = ranking.find((r) => r.userId === profile?.id);
 
-  function save() {
-    updateProfile({ name, birthday: birthday || null });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
+  async function save() {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await updateProfile({ name, birthday: birthday || null });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+    } catch (err) {
+      // Ohne dieses catch wurde "Gespeichert ✓" angezeigt, selbst wenn das
+      // Update gegen Supabase fehlgeschlagen ist – der Nutzer dachte dann,
+      // die Änderung sei übernommen, obwohl sie verworfen wurde.
+      setSaveError(
+        err instanceof Error ? err.message : "Speichern fehlgeschlagen. Bitte erneut versuchen."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (!ready || !profile) {
@@ -120,15 +136,18 @@ export default function ProfilePage() {
           )}
         </Card>
 
-        <Button fullWidth size="lg" onClick={save}>
-          {saved ? "Gespeichert ✓" : "Speichern"}
+        <Button fullWidth size="lg" onClick={save} disabled={saving}>
+          {saving ? "Speichert…" : saved ? "Gespeichert ✓" : "Speichern"}
         </Button>
+        {saveError && (
+          <p className="text-[#FF453A] text-xs text-center">{saveError}</p>
+        )}
 
         <div className="pt-4 pb-6">
           <p className="text-muted text-xs text-center leading-relaxed">
-            Salut! läuft aktuell im lokalen Demo-Modus. Verbinde Supabase in
-            den Projekt-Einstellungen für Multi-Device-Sync mit deiner
-            gesamten Crew.
+            {isRemoteMode()
+              ? "Salut! ist mit Supabase verbunden – deine Crew sieht alles live auf ihren eigenen Geräten."
+              : "Salut! läuft aktuell im lokalen Demo-Modus. Verbinde Supabase in den Projekt-Einstellungen für Multi-Device-Sync mit deiner gesamten Crew."}
           </p>
         </div>
       </div>

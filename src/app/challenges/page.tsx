@@ -12,17 +12,29 @@ import { listGroups, getOrCreateQuickEvent } from "@/lib/data-layer";
 export default function ModesPage() {
   const router = useRouter();
   const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function startEvening() {
     setStarting(true);
-    const groups = await listGroups();
-    const group = groups[0];
-    if (!group) {
+    setError(null);
+    try {
+      const groups = await listGroups();
+      const group = groups[0];
+      if (!group) {
+        setError("Noch keine Crew – erstelle zuerst eine Gruppe im Freunde-Tab.");
+        return;
+      }
+      const event = await getOrCreateQuickEvent(group.id);
+      router.push(`/events/${event.id}`);
+    } catch (err) {
+      // Ohne dieses catch blieb der Button bei einem Supabase-Fehler für
+      // immer auf "Wird gestartet…" hängen.
+      setError(
+        err instanceof Error ? err.message : "Abend konnte nicht gestartet werden. Bitte erneut versuchen."
+      );
+    } finally {
       setStarting(false);
-      return;
     }
-    const event = await getOrCreateQuickEvent(group.id);
-    router.push(`/events/${event.id}`);
   }
 
   return (
@@ -54,6 +66,11 @@ export default function ModesPage() {
           >
             {starting ? "Wird gestartet…" : "Abend starten 🥂"}
           </Button>
+          {error && (
+            <p className="text-white text-xs text-center mt-3 bg-black/20 rounded-lg py-2 px-3">
+              {error}
+            </p>
+          )}
         </motion.div>
 
         <div className="grid grid-cols-2 gap-3 opacity-50 pointer-events-none">

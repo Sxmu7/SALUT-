@@ -42,7 +42,8 @@ export default function DashboardPage() {
     })();
   }, [profile]);
 
-  if (!profileReady || !groupReady || !profile || !group) {
+  // Noch am Laden (Profil/Gruppe werden gerade geladen): Skeletons zeigen.
+  if (!profileReady || !groupReady || !profile) {
     return (
       <AppShell>
         <TopBarSkeleton />
@@ -53,6 +54,39 @@ export default function DashboardPage() {
             <Skeleton className="h-20 rounded-[var(--radius-md)]" />
           </div>
           <CardSkeleton lines={3} />
+        </div>
+      </AppShell>
+    );
+  }
+
+  // Fertig geladen, aber (noch) keine Gruppe vorhanden – das ist ein
+  // gültiger Zustand (z.B. bei Supabase-Nutzern, deren automatische
+  // Erstgruppe aus irgendeinem Grund fehlgeschlagen ist) und darf die App
+  // nicht für immer im Skeleton hängen lassen. Statt einer endlosen
+  // Ladeanimation bekommt der Nutzer hier einen klaren Weg nach vorn.
+  if (!group) {
+    return (
+      <AppShell>
+        <TopBar
+          title={`Hey ${profile.name} 👋`}
+          right={<Avatar emoji={profile.avatarEmoji} size="md" />}
+        />
+        <div className="px-5">
+          <Card className="text-center py-10">
+            <span className="text-4xl">🎉</span>
+            <p className="font-display font-bold text-lg mt-3">
+              Noch keine Crew
+            </p>
+            <p className="text-muted text-sm mt-2 max-w-[260px] mx-auto">
+              Erstelle eine Gruppe oder tritt mit einem Einladungscode bei,
+              um loszulegen.
+            </p>
+            <Link href="/groups">
+              <Button fullWidth size="lg" className="mt-6">
+                Zu den Gruppen →
+              </Button>
+            </Link>
+          </Card>
         </div>
       </AppShell>
     );

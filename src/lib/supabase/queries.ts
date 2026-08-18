@@ -149,6 +149,7 @@ export async function createOrUpdateProfile(patch: Partial<Profile>): Promise<Pr
   const supabase = getSupabaseClient();
   const userId = await ensureSupabaseUser();
   const current = await getCurrentProfile();
+  const isNewProfile = current === null;
   const next = {
     id: userId,
     name: patch.name ?? current?.name ?? "Spieler",
@@ -161,7 +162,27 @@ export async function createOrUpdateProfile(patch: Partial<Profile>): Promise<Pr
     .select()
     .single();
   if (error) throw error;
-  return mapProfileRow(data);
+  const profile = mapProfileRow(data);
+
+  // Ein brandneues Profil ohne jede Gruppe würde die App sonst dauerhaft
+  // im Lade-Zustand hängen lassen (Dashboard wartet auf eine erste
+  // Gruppe) – im lokalen Demo-Modus übernimmt das lib/db.ts automatisch,
+  // hier holen wir das bewusst nach. Fehlschläge hier sollen das
+  // eigentliche Onboarding nicht blockieren, deshalb kein throw.
+  if (isNewProfile) {
+    try {
+      const existingGroups = await listGroups();
+      if (existingGroups.length === 0) {
+        await createGroup("Meine Crew", "🎉");
+      }
+    } catch {
+      // Nutzer landet dann auf der leeren "Freunde"-Seite und kann manuell
+      // eine Gruppe erstellen/beitreten – besser als das Onboarding zu
+      // blockieren.
+    }
+  }
+
+  return profile;
 }
 
 export async function getProfileById(id: string): Promise<Profile | null> {
