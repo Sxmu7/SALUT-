@@ -17,7 +17,7 @@ import { Group, Profile } from "@/types";
 const GROUP_EMOJIS = ["🎉", "🍻", "🥂", "🎊", "🔥", "🎈"];
 
 export default function GroupsPage() {
-  const { groups, ready, create, join } = useGroups();
+  const { groups, ready, error: loadError, refresh, create, join } = useGroups();
   const [mode, setMode] = useState<"none" | "create" | "join">("none");
   const [name, setName] = useState("");
   const [emoji, setEmoji] = useState(GROUP_EMOJIS[0]);
@@ -63,7 +63,18 @@ export default function GroupsPage() {
           </>
         )}
 
+        {ready && loadError && (
+          <Card className="text-center py-6">
+            <p className="text-sm font-semibold">Gruppen konnten nicht geladen werden</p>
+            <p className="text-muted text-xs mt-1 break-words">{loadError}</p>
+            <Button size="sm" variant="secondary" className="mt-3" onClick={() => refresh()}>
+              Erneut versuchen
+            </Button>
+          </Card>
+        )}
+
         {ready &&
+          !loadError &&
           groups.map((g, i) => <GroupCard key={g.id} group={g} index={i} />)}
 
         <div className="grid grid-cols-2 gap-3 pt-2">

@@ -201,7 +201,13 @@ export async function listGroups(): Promise<Group[]> {
     .from("group_members")
     .select("groups(id, name, emoji, invite_code, owner_id, created_at)")
     .eq("user_id", userId);
-  if (error || !data) return [];
+  // Wichtig: bei einem echten Fehler (RLS, Netzwerk, fehlende Funktion...)
+  // NICHT einfach [] zurückgeben – das sieht für die UI exakt so aus wie
+  // "Nutzer hat wirklich keine Gruppe" und verschluckt den eigentlichen
+  // Fehler komplett. Aufrufer, die das tolerieren können (z.B. best-effort
+  // Hintergrundchecks), fangen das gezielt selbst ab.
+  if (error) throw error;
+  if (!data) return [];
   const rows = data
     .map((row: { groups: Record<string, unknown> | null }) => row.groups)
     .filter((g: Record<string, unknown> | null): g is Record<string, unknown> => Boolean(g));
@@ -363,7 +369,11 @@ export async function createEvent(input: {
  * redundant dazu, nicht als Ersatz gedacht.
  */
 export async function ensureBirthdayEvents(): Promise<GameEvent[]> {
-  const groups = await listGroups();
+  // Best-effort-Hintergrundcheck beim Dashboard-Öffnen – ein Fehler hier
+  // (Netzwerk, RLS, ...) darf das Dashboard selbst nicht zum Absturz oder
+  // zu einer unbehandelten Promise-Ablehnung bringen, deshalb bewusst
+  // geschluckt statt wie sonst durchgereicht.
+  const groups = await listGroups().catch(() => []);
   const created: GameEvent[] = [];
   const thisYear = new Date().getFullYear();
 

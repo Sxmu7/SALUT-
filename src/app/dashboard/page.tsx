@@ -21,7 +21,7 @@ import { daysUntil } from "@/lib/utils";
 export default function DashboardPage() {
   const router = useRouter();
   const { profile, ready: profileReady, onboarded } = useProfile();
-  const { group, ready: groupReady } = usePrimaryGroup();
+  const { group, ready: groupReady, error: groupError, refresh: refreshGroup } = usePrimaryGroup();
   const { ranking } = useRanking(group?.id);
   const { highlight } = useNextHighlight(group?.id);
   const [birthdayToday, setBirthdayToday] = useState(false);
@@ -59,9 +59,40 @@ export default function DashboardPage() {
     );
   }
 
-  // Fertig geladen, aber (noch) keine Gruppe vorhanden – das ist ein
-  // gültiger Zustand (z.B. bei Supabase-Nutzern, deren automatische
-  // Erstgruppe aus irgendeinem Grund fehlgeschlagen ist) und darf die App
+  // Laden ist fertig, aber das Nachladen der Gruppe ist mit einem echten
+  // Fehler gescheitert (Netzwerk, RLS, fehlende Datenbankfunktion, ...).
+  // Das MUSS sich anders anfühlen als "du hast einfach noch keine Crew" –
+  // sonst wirkt eine frisch erstellte Gruppe, die aus irgendeinem Grund
+  // nicht geladen werden konnte, wie "Erstellen hat nichts gebracht",
+  // ohne jeden Hinweis, was wirklich schiefging.
+  if (groupError) {
+    return (
+      <AppShell>
+        <TopBar
+          title={`Hey ${profile.name} 👋`}
+          right={<Avatar emoji={profile.avatarEmoji} size="md" />}
+        />
+        <div className="px-5">
+          <Card className="text-center py-10">
+            <span className="text-4xl">⚠️</span>
+            <p className="font-display font-bold text-lg mt-3">
+              Gruppe konnte nicht geladen werden
+            </p>
+            <p className="text-muted text-sm mt-2 max-w-[280px] mx-auto break-words">
+              {groupError}
+            </p>
+            <Button fullWidth size="lg" className="mt-6" onClick={() => refreshGroup()}>
+              Erneut versuchen
+            </Button>
+          </Card>
+        </div>
+      </AppShell>
+    );
+  }
+
+  // Fertig geladen, keine Fehler, aber (noch) keine Gruppe vorhanden – das
+  // ist ein gültiger Zustand (z.B. bei Supabase-Nutzern, deren automatische
+  // Erstgruppe aus irgendeinem Grund nicht angelegt wurde) und darf die App
   // nicht für immer im Skeleton hängen lassen. Statt einer endlosen
   // Ladeanimation bekommt der Nutzer hier einen klaren Weg nach vorn.
   if (!group) {
