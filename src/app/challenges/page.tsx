@@ -7,20 +7,21 @@ import Link from "next/link";
 import { AppShell } from "@/components/layout/AppShell";
 import { TopBar } from "@/components/layout/TopBar";
 import { Button } from "@/components/ui/Button";
-import { listGroups, getOrCreateQuickEvent } from "@/lib/db";
+import { listGroups, getOrCreateQuickEvent } from "@/lib/data-layer";
 
 export default function ModesPage() {
   const router = useRouter();
   const [starting, setStarting] = useState(false);
 
-  function startEvening() {
+  async function startEvening() {
     setStarting(true);
-    const group = listGroups()[0];
+    const groups = await listGroups();
+    const group = groups[0];
     if (!group) {
       setStarting(false);
       return;
     }
-    const event = getOrCreateQuickEvent(group.id);
+    const event = await getOrCreateQuickEvent(group.id);
     router.push(`/events/${event.id}`);
   }
 

@@ -39,15 +39,31 @@ und pushen.
 
 ## 4. (Optional) Supabase für echtes Multi-Device-Play verbinden
 
-Siehe `SETUP.md` im Projekt – kurz zusammengefasst:
+Ohne Supabase läuft jedes Gerät mit seinen eigenen lokalen Daten (kein
+Teilen von Gruppen zwischen Handys). Mit Supabase verbunden wird daraus ein
+echtes Multi-Device-Backend: eigene Konten (anonym, ohne Login-Zwang),
+geteilte Gruppen/Events/Ranking, Beweisfotos im Storage statt im Browser,
+Live-Abstimmung per Realtime, und der tägliche Geburtstags-Cron läuft
+serverseitig statt nur beim Öffnen der App.
 
-1. Supabase-Projekt anlegen, `supabase/schema.sql` im SQL-Editor ausführen.
-2. In Vercel → Project Settings → Environment Variables setzen:
+Siehe `SETUP.md` im Projekt für die volle Anleitung – kurz zusammengefasst:
+
+1. Supabase-Projekt anlegen, `supabase/schema.sql` im SQL-Editor ausführen
+   (Tabellen, RLS-Policies, zwei Datenbankfunktionen, Seed der festen
+   Challenges).
+2. Unter Authentication → Providers → **Anonymous Sign-Ins** aktivieren.
+3. In Vercel → Project Settings → Environment Variables setzen (siehe auch
+   `.env.example`):
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY` (für den täglichen Geburtstags-Cron)
    - optional `CRON_SECRET`
-3. Redeploy anstoßen.
+4. Redeploy anstoßen.
+
+Die Anbindung wurde in einer Umgebung ohne Netzwerkzugriff auf Supabase
+gebaut und konnte daher nicht live gegen ein echtes Projekt getestet
+werden – bitte einmal mit zwei Geräten/Browser-Profilen durchklicken, bevor
+darauf eine echte Party läuft (Details dazu ebenfalls in `SETUP.md`).
 
 ## Warum kein Auto-Deploy durch mich?
 

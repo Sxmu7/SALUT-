@@ -6,7 +6,7 @@ import {
   listGroupMembers,
   createGroup,
   joinGroupByCode,
-} from "@/lib/db";
+} from "@/lib/data-layer";
 import { Group, Profile } from "@/types";
 
 /** Alle Gruppen/Crews des aktuellen Nutzers ("Freunde"-Tab). */
@@ -14,28 +14,34 @@ export function useGroups() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [ready, setReady] = useState(false);
 
-  const refresh = useCallback(() => {
-    setGroups(listGroups());
+  const refresh = useCallback(async () => {
+    setGroups(await listGroups());
   }, []);
 
   useEffect(() => {
-    refresh();
-    setReady(true);
+    let cancelled = false;
+    (async () => {
+      await refresh();
+      if (!cancelled) setReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [refresh]);
 
   const create = useCallback(
-    (name: string, emoji: string) => {
-      const g = createGroup(name, emoji);
-      refresh();
+    async (name: string, emoji: string) => {
+      const g = await createGroup(name, emoji);
+      await refresh();
       return g;
     },
     [refresh]
   );
 
   const join = useCallback(
-    (code: string) => {
-      const g = joinGroupByCode(code);
-      if (g) refresh();
+    async (code: string) => {
+      const g = await joinGroupByCode(code);
+      if (g) await refresh();
       return g;
     },
     [refresh]
@@ -50,15 +56,22 @@ export function usePrimaryGroup() {
   const [members, setMembers] = useState<Profile[]>([]);
   const [ready, setReady] = useState(false);
 
-  const refresh = useCallback(() => {
-    const g = listGroups()[0] ?? null;
+  const refresh = useCallback(async () => {
+    const groups = await listGroups();
+    const g = groups[0] ?? null;
     setGroup(g);
-    setMembers(g ? listGroupMembers(g.id) : []);
+    setMembers(g ? await listGroupMembers(g.id) : []);
   }, []);
 
   useEffect(() => {
-    refresh();
-    setReady(true);
+    let cancelled = false;
+    (async () => {
+      await refresh();
+      if (!cancelled) setReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [refresh]);
 
   return { group, members, ready, refresh };

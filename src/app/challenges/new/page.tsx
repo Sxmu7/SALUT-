@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { CategoryPill } from "@/components/challenges/CategoryPill";
 import { CATEGORIES } from "@/lib/data/categories";
-import { addCustomChallenges } from "@/lib/db";
+import { addCustomChallenges } from "@/lib/data-layer";
 import { parseChallengesFromText } from "@/lib/parseChallenges";
 import { CategoryId, Challenge, ProofType } from "@/types";
 import { uid } from "@/lib/utils";
@@ -30,7 +30,7 @@ export default function NewChallengePage() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [imported, setImported] = useState<Challenge[]>([]);
 
-  function addManual() {
+  async function addManual() {
     if (!title.trim()) return;
     const challenge: Challenge = {
       id: uid("custom"),
@@ -45,7 +45,7 @@ export default function NewChallengePage() {
       isCustom: true,
       source: "manual",
     };
-    addCustomChallenges([challenge]);
+    await addCustomChallenges([challenge]);
     router.push("/challenges");
   }
 
@@ -59,9 +59,9 @@ export default function NewChallengePage() {
     reader.readAsText(file);
   }
 
-  function confirmImport() {
+  async function confirmImport() {
     if (imported.length === 0) return;
-    addCustomChallenges(imported);
+    await addCustomChallenges(imported);
     router.push("/challenges");
   }
 

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
 import { LogoMark } from "@/components/brand/Logo";
-import { createOrUpdateProfile } from "@/lib/db";
+import { createOrUpdateProfile } from "@/lib/data-layer";
 import { AVATAR_EMOJIS } from "@/lib/utils";
 
 const INTRO_STEPS = 5;
@@ -47,6 +47,7 @@ export default function OnboardingPage() {
   const [name, setName] = useState("");
   const [emoji, setEmoji] = useState(AVATAR_EMOJIS[0]);
   const [birthday, setBirthday] = useState("");
+  const [finishing, setFinishing] = useState(false);
 
   const nameStep = INTRO_STEPS;
   const avatarStep = INTRO_STEPS + 1;
@@ -58,8 +59,9 @@ export default function OnboardingPage() {
     else finish();
   }
 
-  function finish() {
-    createOrUpdateProfile({
+  async function finish() {
+    setFinishing(true);
+    await createOrUpdateProfile({
       name: name.trim() || "Du",
       avatarEmoji: emoji,
       birthday: birthday || null,
@@ -181,8 +183,14 @@ export default function OnboardingPage() {
             Zurück
           </Button>
         )}
-        <Button fullWidth onClick={next}>
-          {isIntro ? "Weiter" : step < TOTAL_STEPS - 1 ? "Weiter" : "Los geht's 🥂"}
+        <Button fullWidth onClick={next} disabled={finishing}>
+          {finishing
+            ? "Wird gespeichert…"
+            : isIntro
+            ? "Weiter"
+            : step < TOTAL_STEPS - 1
+            ? "Weiter"
+            : "Los geht's 🥂"}
         </Button>
       </div>
     </div>

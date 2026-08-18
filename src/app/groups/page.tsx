@@ -1,22 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { AppShell } from "@/components/layout/AppShell";
 import { TopBar } from "@/components/layout/TopBar";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
+import { CardSkeleton } from "@/components/ui/Skeleton";
 import { useGroups } from "@/hooks/useGroups";
 import { useNextHighlight } from "@/hooks/useRanking";
-import { listGroupMembers } from "@/lib/db";
+import { listGroupMembers } from "@/lib/data-layer";
 import { daysUntil } from "@/lib/utils";
-import { Group } from "@/types";
+import { Group, Profile } from "@/types";
 
 const GROUP_EMOJIS = ["🎉", "🍻", "🥂", "🎊", "🔥", "🎈"];
 
 export default function GroupsPage() {
-  const { groups, create, join } = useGroups();
+  const { groups, ready, create, join } = useGroups();
   const [mode, setMode] = useState<"none" | "create" | "join">("none");
   const [name, setName] = useState("");
   const [emoji, setEmoji] = useState(GROUP_EMOJIS[0]);
@@ -46,9 +47,15 @@ export default function GroupsPage() {
       <TopBar title="Freunde" subtitle="Deine Crews" />
 
       <div className="px-5 space-y-3">
-        {groups.map((g, i) => (
-          <GroupCard key={g.id} group={g} index={i} />
-        ))}
+        {!ready && (
+          <>
+            <CardSkeleton lines={1} className="h-[92px]" />
+            <CardSkeleton lines={1} className="h-[92px]" />
+          </>
+        )}
+
+        {ready &&
+          groups.map((g, i) => <GroupCard key={g.id} group={g} index={i} />)}
 
         <div className="grid grid-cols-2 gap-3 pt-2">
           <Button variant="secondary" onClick={() => setMode("create")}>
@@ -108,8 +115,19 @@ export default function GroupsPage() {
 }
 
 function GroupCard({ group, index }: { group: Group; index: number }) {
-  const members = listGroupMembers(group.id);
+  const [members, setMembers] = useState<Profile[]>([]);
   const { highlight } = useNextHighlight(group.id);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const m = await listGroupMembers(group.id);
+      if (!cancelled) setMembers(m);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [group.id]);
   const days = highlight ? daysUntil(highlight.date.toISOString()) : null;
 
   return (

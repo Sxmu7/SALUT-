@@ -11,10 +11,11 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { CountdownFlip } from "@/components/ui/CountdownFlip";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
+import { TopBarSkeleton, CardSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { useProfile } from "@/hooks/useProfile";
 import { usePrimaryGroup } from "@/hooks/useGroups";
 import { useRanking, useNextHighlight } from "@/hooks/useRanking";
-import { ensureBirthdayEvents, getOrCreateQuickEvent } from "@/lib/db";
+import { ensureBirthdayEvents, getOrCreateQuickEvent } from "@/lib/data-layer";
 import { daysUntil } from "@/lib/utils";
 
 export default function DashboardPage() {
@@ -33,16 +34,26 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!profile) return;
-    const created = ensureBirthdayEvents();
-    if (created.some((e) => e.birthdayUserId === profile.id)) {
-      setBirthdayToday(true);
-    }
+    (async () => {
+      const created = await ensureBirthdayEvents();
+      if (created.some((e) => e.birthdayUserId === profile.id)) {
+        setBirthdayToday(true);
+      }
+    })();
   }, [profile]);
 
   if (!profileReady || !groupReady || !profile || !group) {
     return (
       <AppShell>
-        <div className="p-6 text-muted">Lädt…</div>
+        <TopBarSkeleton />
+        <div className="px-5 space-y-4">
+          <CardSkeleton lines={2} className="h-32" />
+          <div className="grid grid-cols-2 gap-3">
+            <Skeleton className="h-20 rounded-[var(--radius-md)]" />
+            <Skeleton className="h-20 rounded-[var(--radius-md)]" />
+          </div>
+          <CardSkeleton lines={3} />
+        </div>
       </AppShell>
     );
   }
@@ -140,8 +151,8 @@ export default function DashboardPage() {
           <Button
             fullWidth
             size="lg"
-            onClick={() => {
-              const event = getOrCreateQuickEvent(group.id);
+            onClick={async () => {
+              const event = await getOrCreateQuickEvent(group.id);
               router.push(`/events/${event.id}`);
             }}
           >

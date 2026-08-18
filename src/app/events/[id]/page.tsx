@@ -1,23 +1,58 @@
 "use client";
 
-import { use as usePromise } from "react";
+import { use as usePromise, useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { AppShell } from "@/components/layout/AppShell";
 import { TopBar } from "@/components/layout/TopBar";
 import { ChallengeCard } from "@/components/challenges/ChallengeCard";
 import { DiceRoller } from "@/components/challenges/DiceRoller";
+import { TopBarSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { useEvent } from "@/hooks/useEvent";
 import { useProfile } from "@/hooks/useProfile";
-import { getAnyChallenge } from "@/lib/db";
+import { getAnyChallenge } from "@/lib/data-layer";
 import { formatDate } from "@/lib/utils";
+import { Challenge } from "@/types";
 
 export default function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = usePromise(params);
   const { event, submissions } = useEvent(id);
   const { profile } = useProfile();
+  const [revealed, setRevealed] = useState<Challenge[]>([]);
 
-  if (event === undefined) return null;
+  // event.challengeIds wächst ausschließlich durch Würfeln – hier stehen
+  // also nur Challenges, die die Gruppe in diesem Abend schon aufgedeckt hat.
+  // Der Rest bleibt bewusst verborgen, bis gewürfelt wird.
+  useEffect(() => {
+    if (!event) {
+      setRevealed([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const challenges = await Promise.all(event.challengeIds.map((cid) => getAnyChallenge(cid)));
+      if (cancelled) return;
+      setRevealed(
+        challenges.filter((c): c is Challenge => Boolean(c)).reverse()
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [event]);
+
+  if (event === undefined) {
+    return (
+      <AppShell>
+        <TopBarSkeleton />
+        <div className="px-5 space-y-3">
+          <Skeleton className="h-24 rounded-[28px]" />
+          <Skeleton className="h-16 rounded-2xl" />
+          <Skeleton className="h-16 rounded-2xl" />
+        </div>
+      </AppShell>
+    );
+  }
   if (event === null) {
     return (
       <AppShell>
@@ -25,14 +60,6 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
       </AppShell>
     );
   }
-
-  // event.challengeIds wächst ausschließlich durch Würfeln – hier stehen
-  // also nur Challenges, die die Gruppe in diesem Abend schon aufgedeckt hat.
-  // Der Rest bleibt bewusst verborgen, bis gewürfelt wird.
-  const revealed = event.challengeIds
-    .map((cid) => getAnyChallenge(cid))
-    .filter((c): c is NonNullable<typeof c> => Boolean(c))
-    .reverse();
 
   function statusFor(challengeId: string) {
     const sub = submissions.find(

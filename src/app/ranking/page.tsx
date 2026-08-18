@@ -5,14 +5,16 @@ import { AppShell } from "@/components/layout/AppShell";
 import { TopBar } from "@/components/layout/TopBar";
 import { LeaderboardRow } from "@/components/ranking/LeaderboardRow";
 import { Avatar } from "@/components/ui/Avatar";
+import { RowSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { useProfile } from "@/hooks/useProfile";
 import { usePrimaryGroup } from "@/hooks/useGroups";
 import { useRanking } from "@/hooks/useRanking";
 
 export default function RankingPage() {
   const { profile } = useProfile();
-  const { group } = usePrimaryGroup();
-  const { ranking } = useRanking(group?.id);
+  const { group, ready: groupReady } = usePrimaryGroup();
+  const { ranking, ready: rankingReady } = useRanking(group?.id);
+  const ready = groupReady && rankingReady;
 
   const podium = ranking.slice(0, 3);
   const rest = ranking.slice(3);
@@ -23,7 +25,22 @@ export default function RankingPage() {
       <TopBar title="Ranking 🏆" subtitle={group?.name} />
 
       <div className="px-5">
-        {podium.length > 0 && (
+        {!ready && (
+          <>
+            <div className="flex items-end justify-center gap-3 mb-6 pt-4">
+              <Skeleton className="w-16 h-28 rounded-t-xl" />
+              <Skeleton className="w-16 h-36 rounded-t-xl" />
+              <Skeleton className="w-16 h-24 rounded-t-xl" />
+            </div>
+            <div className="space-y-3 pb-6">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <RowSkeleton key={i} />
+              ))}
+            </div>
+          </>
+        )}
+
+        {ready && podium.length > 0 && (
           <div className="flex items-end justify-center gap-3 mb-6 pt-4">
             {order.map((entry, i) => {
               if (!entry) return null;
@@ -60,21 +77,23 @@ export default function RankingPage() {
           </div>
         )}
 
-        <div className="space-y-1.5 pb-6">
-          {rest.map((entry, i) => (
-            <LeaderboardRow
-              key={entry.userId}
-              entry={entry}
-              index={i}
-              isSelf={entry.userId === profile?.id}
-            />
-          ))}
-          {ranking.length === 0 && (
-            <p className="text-muted text-sm text-center py-16">
-              Noch keine Punkte gesammelt – starte deine erste Challenge!
-            </p>
-          )}
-        </div>
+        {ready && (
+          <div className="space-y-1.5 pb-6">
+            {rest.map((entry, i) => (
+              <LeaderboardRow
+                key={entry.userId}
+                entry={entry}
+                index={i}
+                isSelf={entry.userId === profile?.id}
+              />
+            ))}
+            {ranking.length === 0 && (
+              <p className="text-muted text-sm text-center py-16">
+                Noch keine Punkte gesammelt – starte deine erste Challenge!
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </AppShell>
   );

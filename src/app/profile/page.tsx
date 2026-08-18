@@ -7,6 +7,7 @@ import { TopBar } from "@/components/layout/TopBar";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
+import { TopBarSkeleton, CardSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { useProfile } from "@/hooks/useProfile";
 import { usePrimaryGroup } from "@/hooks/useGroups";
 import { useRanking } from "@/hooks/useRanking";
@@ -34,7 +35,25 @@ export default function ProfilePage() {
     setTimeout(() => setSaved(false), 1800);
   }
 
-  if (!ready || !profile) return null;
+  if (!ready || !profile) {
+    return (
+      <AppShell>
+        <TopBarSkeleton />
+        <div className="px-5 space-y-4">
+          <div className="card-surface rounded-[var(--radius-md)] p-8 flex flex-col items-center">
+            <Skeleton className="w-20 h-20 rounded-full" />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <Skeleton className="h-16 rounded-[var(--radius-md)]" />
+            <Skeleton className="h-16 rounded-[var(--radius-md)]" />
+            <Skeleton className="h-16 rounded-[var(--radius-md)]" />
+          </div>
+          <CardSkeleton lines={1} />
+          <CardSkeleton lines={1} />
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>

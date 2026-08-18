@@ -9,9 +9,16 @@ import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
 import { fireConfetti } from "@/components/ui/Confetti";
 import { getCategory } from "@/lib/data/categories";
+import { TopBarSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { useProfile } from "@/hooks/useProfile";
 import { useEventChallenge } from "@/hooks/useEvent";
-import { submitChallengeProof, listSubmissionsForUser, listGroupMembers } from "@/lib/db";
+import {
+  submitChallengeProof,
+  listSubmissionsForUser,
+  listGroupMembers,
+  isRemoteMode,
+} from "@/lib/data-layer";
+import { Profile } from "@/types";
 
 export default function ChallengePlayPage({
   params,
@@ -32,12 +39,17 @@ export default function ChallengePlayPage({
   const [preview, setPreview] = useState<string | null>(null);
   const [proofType, setProofType] = useState<"photo" | "video" | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [members, setMembers] = useState<Profile[]>([]);
   const celebratedRef = useRef(false);
 
+  // Im Supabase-Modus übernimmt useEventChallenge das per Realtime-
+  // Subscription (siehe hooks/useEvent.ts) – hier pollen wir nur noch im
+  // lokalen Demo-Modus, wo es kein Realtime gibt.
   useEffect(() => {
+    if (isRemoteMode()) return;
     if (!submission || submission.status !== "pending" || !profile) return;
-    const interval = setInterval(() => {
-      const updated = listSubmissionsForUser(id, profile.id).find(
+    const interval = setInterval(async () => {
+      const updated = (await listSubmissionsForUser(id, profile.id)).find(
         (s) => s.id === submission.id
       );
       if (updated && updated.status !== submission.status) {
@@ -48,13 +60,38 @@ export default function ChallengePlayPage({
   }, [submission, id, profile, setSubmission]);
 
   useEffect(() => {
+    if (!event) {
+      setMembers([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const all = await listGroupMembers(event.groupId);
+      if (!cancelled) setMembers(all.filter((m) => m.id !== profile?.id));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [event, profile?.id]);
+
+  useEffect(() => {
     if (submission?.status === "approved" && !celebratedRef.current) {
       celebratedRef.current = true;
       fireConfetti("big");
     }
   }, [submission?.status]);
 
-  if (challenge === undefined || event === undefined) return null;
+  if (challenge === undefined || event === undefined) {
+    return (
+      <AppShell>
+        <TopBarSkeleton />
+        <div className="px-5 space-y-4">
+          <Skeleton className="h-48 rounded-[28px]" />
+          <Skeleton className="h-40 rounded-2xl" />
+        </div>
+      </AppShell>
+    );
+  }
   if (!challenge || !event) {
     return (
       <AppShell>
@@ -75,10 +112,10 @@ export default function ChallengePlayPage({
     }
   }
 
-  function submit(withoutProof = false) {
+  async function submit(withoutProof = false) {
     if (!profile) return;
     setSubmitting(true);
-    const sub = submitChallengeProof({
+    const sub = await submitChallengeProof({
       eventId: id,
       challengeId,
       userId: profile.id,
@@ -89,10 +126,6 @@ export default function ChallengePlayPage({
     setSubmitting(false);
     if (sub.status === "approved") fireConfetti("big");
   }
-
-  const members = event
-    ? listGroupMembers(event.groupId).filter((m) => m.id !== profile?.id)
-    : [];
 
   return (
     <AppShell>

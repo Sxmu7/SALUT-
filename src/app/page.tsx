@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Typewriter } from "@/components/ui/Typewriter";
 import { LogoMark } from "@/components/brand/Logo";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { isOnboarded } from "@/lib/db";
+import { isOnboarded } from "@/lib/data-layer";
 
 // Kurz, einfach, ohne Vergleiche zu anderen Apps – verständlich für jeden.
 // Wird nur beim allerersten Öffnen gezeigt (siehe `returning` unten).
@@ -29,8 +29,10 @@ export default function LandingPage() {
   const [typedDone, setTypedDone] = useState(false);
 
   useEffect(() => {
-    setReturning(isOnboarded());
-    setReady(true);
+    (async () => {
+      setReturning(await isOnboarded());
+      setReady(true);
+    })();
   }, []);
 
   function goToApp() {

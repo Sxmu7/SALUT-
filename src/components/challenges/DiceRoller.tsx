@@ -2,25 +2,32 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/Button";
 import { getCategory } from "@/lib/data/categories";
-import { pickChallengeForEvent, addChallengeToEvent } from "@/lib/db";
+import { pickChallengeForEvent, addChallengeToEvent } from "@/lib/data-layer";
 import { categoryForFace, rollDie, DICE_FACES } from "@/lib/dice";
+import { CategoryId } from "@/types";
 
 export function DiceRoller({ eventId }: { eventId: string }) {
   const router = useRouter();
   const [rolling, setRolling] = useState(false);
   const [face, setFace] = useState<number | null>(null);
+  const [revealedCategoryId, setRevealedCategoryId] = useState<CategoryId | null>(null);
   const [empty, setEmpty] = useState(false);
+  // Gesetzt, wenn die gewürfelte Kategorie für diesen Abend schon leer
+  // gespielt ist und pickChallengeForEvent auf eine andere ausweicht –
+  // das soll sichtbar sein statt sich wie ein Bug anzufühlen.
+  const [fallback, setFallback] = useState<{ from: CategoryId; to: CategoryId } | null>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  const category = face ? getCategory(categoryForFace(face)) : null;
+  const category = revealedCategoryId ? getCategory(revealedCategoryId) : null;
 
   function roll() {
     if (rolling) return;
     setRolling(true);
     setEmpty(false);
+    setFallback(null);
 
     const ticks = 10;
     for (let i = 0; i < ticks; i++) {
@@ -33,18 +40,32 @@ export function DiceRoller({ eventId }: { eventId: string }) {
     const settle = setTimeout(() => {
       const finalFace = rollDie();
       setFace(finalFace);
-      const cat = categoryForFace(finalFace);
-      const revealDelay = setTimeout(() => {
-        const challenge = pickChallengeForEvent(eventId, cat);
+      const rolledCategoryId = categoryForFace(finalFace);
+      setRevealedCategoryId(rolledCategoryId);
+
+      const revealDelay = setTimeout(async () => {
+        const challenge = await pickChallengeForEvent(eventId, rolledCategoryId);
         if (!challenge) {
           setEmpty(true);
           setRolling(false);
           return;
         }
-        addChallengeToEvent(eventId, challenge.id);
-        const navDelay = setTimeout(() => {
-          router.push(`/events/${eventId}/challenges/${challenge.id}`);
-        }, 550);
+
+        const isFallback = challenge.categoryId !== rolledCategoryId;
+        if (isFallback) {
+          setRevealedCategoryId(challenge.categoryId);
+          setFallback({ from: rolledCategoryId, to: challenge.categoryId });
+        }
+
+        await addChallengeToEvent(eventId, challenge.id);
+        const navDelay = setTimeout(
+          () => {
+            router.push(`/events/${eventId}/challenges/${challenge.id}`);
+          },
+          // Bei Fallback bleibt der Hinweistext etwas länger sichtbar,
+          // bevor wir weiterspringen.
+          isFallback ? 1400 : 550
+        );
         timeoutsRef.current.push(navDelay);
       }, 450);
       timeoutsRef.current.push(revealDelay);
@@ -83,12 +104,34 @@ export function DiceRoller({ eventId }: { eventId: string }) {
         {rolling ? "Würfelt…" : face ? "Nochmal würfeln 🎲" : "Würfeln 🎲"}
       </Button>
 
-      {empty && (
-        <p className="text-muted text-xs text-center max-w-[240px]">
-          Für diese Kategorie sind schon alle Challenges gespielt – versuch
-          es einfach nochmal, dann kommt eine andere dran.
-        </p>
-      )}
+      <AnimatePresence mode="wait">
+        {fallback && (
+          <motion.p
+            key="fallback"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="text-muted text-xs text-center max-w-[260px]"
+          >
+            {getCategory(fallback.from).icon} {getCategory(fallback.from).name} ist für
+            heute schon leer gespielt – hier kommt stattdessen eine{" "}
+            {getCategory(fallback.to).icon} {getCategory(fallback.to).name}-Challenge.
+          </motion.p>
+        )}
+
+        {empty && (
+          <motion.p
+            key="empty"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="text-muted text-xs text-center max-w-[240px]"
+          >
+            Für diesen Abend sind schon alle Challenges gespielt – auf zur
+            nächsten Party!
+          </motion.p>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
