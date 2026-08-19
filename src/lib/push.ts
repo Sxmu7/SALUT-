@@ -19,6 +19,24 @@ export function isPushSupported(): boolean {
   );
 }
 
+/**
+ * iOS/iPadOS unterstützt Web Push erst ab 16.4 UND nur, wenn die PWA über
+ * "Zum Home-Bildschirm" installiert wurde (Safari im normalen Tab liefert
+ * kein PushManager) – isPushSupported() liefert dort also `false`, ohne
+ * dass ersichtlich wäre, warum. Dieser Helfer erkennt genau diesen Fall,
+ * damit die UI (siehe VoteNotifyToggle.tsx) statt eines stillschweigend
+ * verschwundenen Schalters einen erklärenden Hinweis zeigen kann.
+ */
+export function isIosNonStandalone(): boolean {
+  if (typeof window === "undefined") return false;
+  const ua = window.navigator.userAgent || "";
+  const isIos = /iphone|ipad|ipod/i.test(ua) || (ua.includes("Macintosh") && "ontouchend" in document);
+  if (!isIos) return false;
+  const nav = window.navigator as Navigator & { standalone?: boolean };
+  const isStandalone = nav.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+  return !isStandalone;
+}
+
 // Web Push erwartet den VAPID-Public-Key als Uint8Array, nicht als
 // Base64-String - kleine, standardisierte Konvertierung (Padding +
 // URL-sicheres Base64 → normales Base64 → Bytes).

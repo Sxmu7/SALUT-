@@ -6,10 +6,11 @@ import { motion } from "framer-motion";
 import { AppShell } from "@/components/layout/AppShell";
 import { TopBar } from "@/components/layout/TopBar";
 import { ChallengeCard } from "@/components/challenges/ChallengeCard";
-import { DiceRoller } from "@/components/challenges/DiceRoller";
+import { DiceRoller, TurnInfo } from "@/components/challenges/DiceRoller";
 import { PartyPushToggle } from "@/components/challenges/PartyPushToggle";
 import { VoteNotifyToggle } from "@/components/challenges/VoteNotifyToggle";
 import { PendingVotes } from "@/components/challenges/PendingVotes";
+import { EventControlsPanel } from "@/components/challenges/EventControlsPanel";
 // PartyBingoPanel ist vorerst deaktiviert (siehe Kommentar unten) - Import
 // bewusst entfernt, um keinen "unused import"-Lint-Fehler zu haben.
 import { TopBarSkeleton, Skeleton } from "@/components/ui/Skeleton";
@@ -98,6 +99,28 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
   const challengesById = new Map(revealed.map((c) => [c.id, c]));
   const membersById = new Map(members.map((m) => [m.id, m]));
 
+  // Reihum-Modus: wer ist dran, und blockiert eine noch offene (nicht
+  // genehmigte) zugewiesene Challenge das nächste Würfeln? Siehe
+  // DiceRoller.tsx – dort wird bei blockedChallenge statt des Würfels ein
+  // "weiter geht's hiermit"-Hinweis gezeigt.
+  let turnInfo: TurnInfo | undefined;
+  if (event.turnModeEnabled && event.turnOrder.length > 0) {
+    const currentTurnUserId = event.turnOrder[event.turnIndex];
+    const allLatestByChallenge = latestByChallenge(submissions);
+    const blockedEntry = Object.entries(event.challengeAssignments).find(
+      ([challengeId, assignedUserId]) =>
+        assignedUserId === currentTurnUserId &&
+        allLatestByChallenge.get(challengeId)?.status !== "approved"
+    );
+    turnInfo = {
+      currentTurnMember: membersById.get(currentTurnUserId),
+      isMyTurn: currentTurnUserId === profile?.id,
+      blockedChallenge: blockedEntry ? challengesById.get(blockedEntry[0]) ?? null : null,
+    };
+  }
+
+  const finished = event.status === "finished";
+
   return (
     <AppShell>
       <TopBar
@@ -124,7 +147,27 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
             ist deaktiviert, damit es sich jederzeit wieder einschalten
             lässt: {event.type === "party" && isRemoteMode() && <PartyBingoPanel eventId={event.id} />} */}
 
-        <DiceRoller eventId={event.id} />
+        {finished ? (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="rounded-2xl p-5 mb-4 text-center"
+            style={{ background: "var(--gradient-party)" }}
+          >
+            <span className="text-3xl">🏁</span>
+            <p className="font-display font-extrabold text-lg text-white mt-1">
+              Abend beendet
+            </p>
+            <p className="text-white/80 text-sm mt-1">
+              {doneCount} Challenge{doneCount === 1 ? "" : "s"} gemeistert – auf zur nächsten Runde!
+            </p>
+          </motion.div>
+        ) : (
+          <>
+            <EventControlsPanel event={event} members={members} onChanged={refresh} />
+            <DiceRoller eventId={event.id} turnInfo={turnInfo} />
+          </>
+        )}
 
         <PendingVotes
           submissions={submissions}

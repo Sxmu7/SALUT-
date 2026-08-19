@@ -68,7 +68,7 @@ darauf eine echte Party läuft (Details dazu ebenfalls in `SETUP.md`).
 ## 5. (Optional) Push-Benachrichtigungen einrichten
 
 Braucht Supabase (Schritt 4) und die [Supabase CLI](https://supabase.com/docs/guides/cli).
-Es gibt zwei unabhängige Push-Funktionen, die sich dieselben VAPID-Secrets
+Es gibt drei unabhängige Push-Funktionen, die sich dieselben VAPID-Secrets
 teilen:
 
 - **🗳️ Abstimmungs-Benachrichtigungen** (`notify-vote-request`): sobald
@@ -77,13 +77,20 @@ teilen:
   Benachrichtigung ("Mia hat eingereicht!") und können direkt zum
   Abstimmen springen – auch bei geschlossener PWA. Wird DIREKT vom Client
   ausgelöst, braucht deshalb **kein** `pg_cron`/`pg_net`.
+- **🎉 Challenge gemeistert** (`notify-challenge-completed`, QuizDuell-
+  Style): sobald irgendjemandes Challenge genehmigt wird (per Abstimmung
+  oder sofort bei Challenges ohne Beweis), bekommen alle anderen
+  Gruppenmitglieder eine Push ("Mia hat's geschafft!"). Im Reihum-Modus
+  bekommt die Person, die jetzt dran ist, zusätzlich eine eigene "Du bist
+  dran!"-Nachricht. Ebenfalls DIREKT vom Client ausgelöst, **kein**
+  `pg_cron`/`pg_net` nötig.
 - **🔔 Automatische Challenges** (`party-push-tick`): schickt im Party-
   Modus automatisch neue Challenges im gewählten Takt, komplett
   serverseitig per Scheduler. Braucht zusätzlich `pg_cron`/`pg_net`
   (Schritt 2 + 5 unten).
 
 Ohne diese Schritte funktioniert die App ganz normal weiter, nur die
-beiden Push-Schalter bleiben ohne Wirkung.
+Push-Schalter bleiben ohne Wirkung.
 
 1. **VAPID-Schlüsselpaar erzeugen** (einmalig, lokal, keine Netzwerkverbindung
    nötig):
@@ -99,15 +106,16 @@ beiden Push-Schalter bleiben ohne Wirkung.
    Für die Abstimmungs-Benachrichtigungen kann dieser Schritt übersprungen
    werden.
 
-3. **Beide Edge Functions deployen** (aus dem entpackten Projektordner):
+3. **Alle drei Edge Functions deployen** (aus dem entpackten Projektordner):
    ```bash
    supabase login
    supabase link --project-ref <dein-project-ref>
    supabase functions deploy notify-vote-request
+   supabase functions deploy notify-challenge-completed
    supabase functions deploy party-push-tick
    ```
-   (Nur eine der beiden gewünscht? Einfach nur die passende Zeile
-   ausführen – beide sind unabhängig voneinander.)
+   (Nur einzelne gewünscht? Einfach nur die passenden Zeilen ausführen –
+   alle drei sind unabhängig voneinander.)
 
 4. **Secrets für die Edge Functions setzen** (gelten für beide Funktionen,
    der Private Key darf NIEMALS ins Frontend/`.env.local`, nur hierhin):
@@ -141,14 +149,23 @@ beiden Push-Schalter bleiben ohne Wirkung.
 
 6. **Client-Env-Var setzen** – in Vercel (und/oder `.env.local`):
    `NEXT_PUBLIC_VAPID_PUBLIC_KEY=<Public Key aus Schritt 1>`, dann redeployen.
-   Gilt für beide Push-Funktionen.
+   Gilt für alle drei Push-Funktionen.
 
 7. **Testen**:
-   - Abstimmungs-Benachrichtigungen: ein beliebiges Event öffnen, "🗳️
-     Abstimmungs-Benachrichtigungen" aktivieren (Browser fragt nach der
-     Notification-Berechtigung), auf einem ANDEREN Gerät/Profil eine
-     Challenge mit Beweis einreichen – die Push sollte sofort ankommen.
-     Fehlt sie, `supabase functions logs notify-vote-request` prüfen.
+   - Abstimmungs- & Challenge-Benachrichtigungen: ein beliebiges Event
+     öffnen, "🔔 Live-Benachrichtigungen" aktivieren (Browser fragt nach
+     der Notification-Berechtigung), auf einem ANDEREN Gerät/Profil eine
+     Challenge einreichen (Push sollte sofort ankommen) und danach
+     genehmigen lassen (zweite Push "hat's geschafft!" sollte folgen).
+     Fehlt sie, `supabase functions logs notify-vote-request` bzw.
+     `supabase functions logs notify-challenge-completed` prüfen.
+   - iPhone/Safari: Push funktioniert dort nur, wenn die PWA vorher über
+     den Teilen-Button → "Zum Home-Bildschirm" installiert wurde (iOS
+     16.4+) – die App zeigt sonst automatisch einen entsprechenden
+     Hinweis statt des Schalters.
+   - Reihum-Modus: im Event-Bildschirm "🔄 Reihum-Modus" aktivieren, auf
+     einem zweiten Gerät/Profil sollte bei genehmigter Challenge eine
+     "Du bist dran!"-Push ankommen statt der generischen Meldung.
    - Automatische Challenges: Party starten (Modi → Abend starten), im
      Event-Bildschirm den "🔔 Automatische Challenges"-Schalter
      aktivieren, Intervall wählen. Die erste Push-Challenge kommt beim

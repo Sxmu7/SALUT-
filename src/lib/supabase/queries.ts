@@ -114,9 +114,14 @@ async function mapEventRow(row: Record<string, unknown>): Promise<GameEvent> {
   const supabase = getSupabaseClient();
   const { data: ecs } = await supabase
     .from("event_challenges")
-    .select("challenge_id")
+    .select("challenge_id, assigned_user_id")
     .eq("event_id", row.id as string)
     .order("sort_order", { ascending: true });
+  const rows = (ecs ?? []) as { challenge_id: string; assigned_user_id: string | null }[];
+  const challengeAssignments: Record<string, string> = {};
+  for (const r of rows) {
+    if (r.assigned_user_id) challengeAssignments[r.challenge_id] = r.assigned_user_id;
+  }
   return {
     id: row.id as string,
     groupId: row.group_id as string,
@@ -126,8 +131,14 @@ async function mapEventRow(row: Record<string, unknown>): Promise<GameEvent> {
     eventDate: row.event_date as string,
     birthdayUserId: (row.birthday_user_id as string | undefined) ?? undefined,
     status: row.status as GameEvent["status"],
-    challengeIds: (ecs ?? []).map((e: { challenge_id: string }) => e.challenge_id),
+    challengeIds: rows.map((e) => e.challenge_id),
     createdAt: row.created_at as string,
+    turnModeEnabled: Boolean(row.turn_mode_enabled),
+    turnOrder: (row.turn_order as string[] | null) ?? [],
+    turnIndex: (row.turn_index as number | null) ?? 0,
+    challengeAssignments,
+    targetChallengeCount: (row.target_challenge_count as number | null) ?? null,
+    endedAt: (row.ended_at as string | null) ?? null,
   };
 }
 
@@ -550,13 +561,56 @@ export async function addChallengeToEvent(
   const event = await getEvent(eventId);
   if (!event) return undefined;
   if (!event.challengeIds.includes(challengeId)) {
+    // Reihum-Modus: die frisch aufgedeckte Challenge geht an die Person,
+    // die laut turnIndex gerade dran ist – unabhängig davon, wer
+    // tatsächlich gewürfelt hat (siehe DiceRoller.tsx/TurnModePanel.tsx).
+    const assignedUserId =
+      event.turnModeEnabled && event.turnOrder.length > 0
+        ? event.turnOrder[event.turnIndex]
+        : null;
     const { error } = await supabase.from("event_challenges").insert({
       event_id: eventId,
       challenge_id: challengeId,
       sort_order: event.challengeIds.length,
+      assigned_user_id: assignedUserId,
     });
     if (error) raise(error);
   }
+  return getEvent(eventId);
+}
+
+// ---------------------------- Reihum-Modus & Abend-Ziel ----------------------------
+// Events haben keine generische UPDATE-Policy (wie der Rest des Schemas
+// bewusst nur Security-Definer-RPCs für Schreibzugriffe, siehe
+// schema.sql) – deshalb hier drei kleine RPCs statt direkter .update().
+
+export async function setTurnMode(eventId: string, enabled: boolean): Promise<GameEvent | undefined> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.rpc("set_turn_mode", {
+    p_event_id: eventId,
+    p_enabled: enabled,
+  });
+  if (error) raise(error);
+  return getEvent(eventId);
+}
+
+export async function setEventTarget(
+  eventId: string,
+  target: number | null
+): Promise<GameEvent | undefined> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.rpc("set_event_target", {
+    p_event_id: eventId,
+    p_target: target,
+  });
+  if (error) raise(error);
+  return getEvent(eventId);
+}
+
+export async function endEvent(eventId: string): Promise<GameEvent | undefined> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.rpc("end_event", { p_event_id: eventId });
+  if (error) raise(error);
   return getEvent(eventId);
 }
 
@@ -675,6 +729,19 @@ export async function submitChallengeProof(input: {
   // ist fertig und soll nicht auf den Push-Versand warten.
   if (created.status === "pending") {
     notifyVoteRequest(created.id);
+  } else if (created.status === "approved") {
+    // proofType "none" wird sofort ohne Abstimmung genehmigt und läuft
+    // deshalb nie durch cast_vote() – Reihum-Weiterschaltung/Abend-Ziel
+    // (finalize_submission_approval(), siehe schema.sql) muss hier separat
+    // angestoßen werden, UND zwar fertig sein, BEVOR die Push-Benachrichtigung
+    // rausgeht (sonst könnte die Push-Funktion noch den alten turn_index
+    // lesen und der falschen Person "du bist dran" schicken). Die ganze
+    // Kette hier ist bewusst nicht awaited: submitChallengeProof() selbst
+    // soll nicht auf Reihum-Update + Push warten.
+    const supabase2 = getSupabaseClient();
+    supabase2
+      .rpc("finalize_submission_approval", { p_submission_id: created.id })
+      .then(() => notifyChallengeCompleted(created.id));
   }
 
   return created;
@@ -727,7 +794,37 @@ export async function castVote(
     p_approve: approve,
   });
   if (error || !data) return null;
-  return mapSubmissionRow(data as Record<string, unknown>);
+  const submission = await mapSubmissionRow(data as Record<string, unknown>);
+
+  // Reihum-Weiterschaltung + evtl. Auto-Abendende laufen bereits serverseitig
+  // innerhalb von cast_vote() (siehe finalize_submission_approval() in
+  // schema.sql) – hier nur noch die QuizDuell-Style Push an die Gruppe.
+  // Bewusst nicht awaited/blockierend: das Voten selbst ist fertig.
+  if (submission.status === "approved") {
+    notifyChallengeCompleted(submission.id);
+  }
+
+  return submission;
+}
+
+/**
+ * "QuizDuell-Style": alle anderen Gruppenmitglieder per Push informieren,
+ * dass gerade jemand eine Challenge gemeistert hat (siehe
+ * notify-challenge-completed Edge Function) – unabhängig davon, ob per
+ * Abstimmung oder automatisch (proofType "none") genehmigt. Wie
+ * notifyVoteRequest() bewusst fehlertolerant: ein Push-Fehlschlag darf den
+ * eigentlichen Spielfluss nie blockieren.
+ */
+export async function notifyChallengeCompleted(submissionId: string): Promise<void> {
+  try {
+    const supabase = getSupabaseClient();
+    const { error } = await supabase.functions.invoke("notify-challenge-completed", {
+      body: { submissionId },
+    });
+    if (error) console.warn("notify-challenge-completed fehlgeschlagen:", error);
+  } catch (err) {
+    console.warn("notify-challenge-completed fehlgeschlagen:", err);
+  }
 }
 
 /** Live-Updates für eine Submission (Status + neue Stimmen) über Supabase

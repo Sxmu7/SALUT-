@@ -103,6 +103,54 @@ export default function ChallengePlayPage({
     );
   }
 
+  // Reihum-Modus: diese Challenge wurde beim Würfeln einer bestimmten
+  // Person zugewiesen (siehe DiceRoller.tsx/addChallengeToEvent) – alle
+  // anderen dürfen sie weder einreichen noch ablehnen, nur ansehen.
+  const assignedUserId = event.turnModeEnabled
+    ? event.challengeAssignments[challengeId]
+    : undefined;
+  const isBlockedByTurn = Boolean(assignedUserId) && assignedUserId !== profile?.id;
+  const assignedMember = assignedUserId ? members.find((m) => m.id === assignedUserId) : undefined;
+
+  if (isBlockedByTurn && !submission) {
+    return (
+      <AppShell>
+        <TopBar title={challenge.title} subtitle={category?.name} />
+        <div className="px-5">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="rounded-[28px] p-8 flex flex-col items-center text-center mb-5"
+            style={{ background: category?.gradient }}
+          >
+            <span className="text-5xl mb-3">{challenge.icon}</span>
+            <p className="text-white/90 text-sm leading-relaxed">{challenge.description}</p>
+          </motion.div>
+
+          <div className="card-surface rounded-2xl p-5 flex flex-col items-center text-center gap-3">
+            {assignedMember && <Avatar emoji={assignedMember.avatarEmoji} size="lg" />}
+            <p className="font-semibold text-sm">
+              🔄 {assignedMember?.name ?? "Jemand anderes"} ist dran
+            </p>
+            <p className="text-muted text-xs">
+              Im Reihum-Modus macht immer nur eine Person die aufgedeckte Challenge. Sobald{" "}
+              {assignedMember?.name ?? "diese Person"} fertig ist, geht&apos;s für alle weiter.
+            </p>
+          </div>
+
+          <Button
+            fullWidth
+            variant="secondary"
+            className="mt-4"
+            onClick={() => router.push(`/events/${id}`)}
+          >
+            Zurück zum Event
+          </Button>
+        </div>
+      </AppShell>
+    );
+  }
+
   function handleFile(file: File) {
     const type = file.type.startsWith("video") ? "video" : "photo";
     setProofType(type);

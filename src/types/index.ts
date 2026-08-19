@@ -65,6 +65,29 @@ export interface GameEvent {
   status: EventStatus;
   challengeIds: string[];
   createdAt: string;
+  /**
+   * "Reihum-Modus": statt dass alle Mitspieler jede aufgedeckte Challenge
+   * parallel machen können, ist immer nur EINE Person am Zug – unabhängig
+   * davon, wer tatsächlich würfelt. Jederzeit im laufenden Event umschaltbar
+   * (siehe TurnModePanel.tsx).
+   */
+  turnModeEnabled: boolean;
+  /** Reihenfolge der Mitglieder-IDs für den Reihum-Modus. Wird beim ersten
+   * Aktivieren aus den aktuellen Gruppenmitgliedern befüllt und bleibt dann
+   * stabil, auch wenn der Modus zwischendurch ausgeschaltet wird. */
+  turnOrder: string[];
+  /** Index in turnOrder – wer gerade dran ist. Rückt erst weiter, wenn die
+   * zugewiesene Challenge dieser Person genehmigt wurde. */
+  turnIndex: number;
+  /** challengeId -> userId: wem eine per Würfel aufgedeckte Challenge im
+   * Reihum-Modus zugewiesen wurde (nur gesetzt, wenn turnModeEnabled zum
+   * Zeitpunkt des Wurfs an war – sonst dürfen wie bisher alle mitmachen). */
+  challengeAssignments: Record<string, string>;
+  /** Optionales Ziel "Abend endet nach X Challenges" – null = kein Ziel. */
+  targetChallengeCount: number | null;
+  /** Gesetzt, sobald der Abend manuell oder automatisch (Ziel erreicht)
+   * beendet wurde. */
+  endedAt: string | null;
 }
 
 export type SubmissionStatus = "pending" | "approved" | "rejected";

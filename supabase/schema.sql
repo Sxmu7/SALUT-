@@ -158,6 +158,20 @@ create table if not exists event_challenges (
   primary key (event_id, challenge_id)
 );
 
+-- ---------- Reihum-Modus & Abend-Ziel ----------
+-- "Reihum-Modus": statt dass alle Mitspieler jede aufgedeckte Challenge
+-- parallel machen können, ist immer nur eine Person am Zug (siehe
+-- TurnModePanel.tsx). turn_order/turn_index leben auf events, welcher
+-- Person eine konkrete aufgedeckte Challenge zugewiesen wurde auf
+-- event_challenges (assigned_user_id) – nötig, weil mehrere Challenges
+-- gleichzeitig offen sein können ("mehrere Runden gleichzeitig").
+alter table events add column if not exists turn_mode_enabled boolean not null default false;
+alter table events add column if not exists turn_order uuid[] not null default '{}';
+alter table events add column if not exists turn_index int not null default 0;
+alter table events add column if not exists target_challenge_count int;
+alter table events add column if not exists ended_at timestamptz;
+alter table event_challenges add column if not exists assigned_user_id uuid references profiles (id);
+
 alter table events enable row level security;
 alter table event_challenges enable row level security;
 
@@ -457,6 +471,162 @@ $$;
 revoke all on function delete_group(uuid) from public;
 grant execute on function delete_group(uuid) to authenticated;
 
+-- ---------- Reihum-Modus & Abend-Ziel (Security Definer) ----------
+-- Events haben bewusst keine generische UPDATE-Policy (wie der Rest dieses
+-- Schemas nur Security-Definer-RPCs für Schreibzugriffe) – daher hier drei
+-- kleine Funktionen statt eines direkten .update() vom Client.
+
+create or replace function set_turn_mode(p_event_id uuid, p_enabled boolean)
+returns events
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_event events;
+  v_order uuid[];
+begin
+  select * into v_event from events where id = p_event_id;
+  if not found then
+    raise exception 'event_not_found';
+  end if;
+  if not is_group_member(v_event.group_id, auth.uid()) then
+    raise exception 'not_a_group_member';
+  end if;
+
+  v_order := v_event.turn_order;
+  -- Reihenfolge nur beim allerersten Aktivieren aus den aktuellen
+  -- Gruppenmitgliedern befüllen – bleibt danach stabil, auch wenn der
+  -- Modus zwischendurch mal ausgeschaltet wird (siehe GameEvent-Typ).
+  if p_enabled and (v_order is null or array_length(v_order, 1) is null) then
+    select array_agg(user_id order by joined_at) into v_order
+      from group_members where group_id = v_event.group_id;
+  end if;
+
+  update events
+    set turn_mode_enabled = p_enabled, turn_order = coalesce(v_order, '{}')
+    where id = p_event_id
+    returning * into v_event;
+  return v_event;
+end;
+$$;
+
+revoke all on function set_turn_mode(uuid, boolean) from public;
+grant execute on function set_turn_mode(uuid, boolean) to authenticated;
+
+create or replace function set_event_target(p_event_id uuid, p_target int)
+returns events
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_event events;
+begin
+  select * into v_event from events where id = p_event_id;
+  if not found then
+    raise exception 'event_not_found';
+  end if;
+  if not is_group_member(v_event.group_id, auth.uid()) then
+    raise exception 'not_a_group_member';
+  end if;
+  if p_target is not null and p_target < 1 then
+    raise exception 'invalid_target';
+  end if;
+
+  update events set target_challenge_count = p_target where id = p_event_id returning * into v_event;
+  return v_event;
+end;
+$$;
+
+revoke all on function set_event_target(uuid, int) from public;
+grant execute on function set_event_target(uuid, int) to authenticated;
+
+create or replace function end_event(p_event_id uuid)
+returns events
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_event events;
+begin
+  select * into v_event from events where id = p_event_id;
+  if not found then
+    raise exception 'event_not_found';
+  end if;
+  if not is_group_member(v_event.group_id, auth.uid()) then
+    raise exception 'not_a_group_member';
+  end if;
+
+  update events set status = 'finished', ended_at = now() where id = p_event_id returning * into v_event;
+  return v_event;
+end;
+$$;
+
+revoke all on function end_event(uuid) from public;
+grant execute on function end_event(uuid) to authenticated;
+
+-- ---------- Nach einer Genehmigung: Reihum weiterschalten + Abend-Ziel prüfen ----------
+-- Wird von cast_vote() (unten) direkt nach dem Genehmigen aufgerufen UND
+-- vom Client für den proofType="none"-Sonderfall (sofortige Genehmigung
+-- ganz ohne Abstimmung, siehe submitChallengeProof() in queries.ts – der
+-- läuft nie durch cast_vote()).
+create or replace function finalize_submission_approval(p_submission_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_submission submissions;
+  v_event events;
+  v_assigned uuid;
+begin
+  select * into v_submission from submissions where id = p_submission_id;
+  if not found or v_submission.status <> 'approved' then
+    return;
+  end if;
+
+  select * into v_event from events where id = v_submission.event_id;
+  if not found then
+    return;
+  end if;
+
+  -- Reihum-Modus: nur weiterschalten, wenn diese Challenge wirklich der
+  -- Person zugewiesen war, die laut turn_index gerade dran war – schützt
+  -- gegen doppeltes Weiterschalten, falls mehrere Runden gleichzeitig
+  -- offen sind und aus Versehen mehrfach aufgerufen wird. Postgres-Arrays
+  -- sind 1-indiziert, turn_index ist wie im Client 0-basiert.
+  if v_event.turn_mode_enabled
+     and array_length(v_event.turn_order, 1) > 0
+     and v_event.turn_order[v_event.turn_index + 1] = v_submission.user_id
+  then
+    select assigned_user_id into v_assigned
+      from event_challenges
+      where event_id = v_submission.event_id and challenge_id = v_submission.challenge_id;
+    if v_assigned = v_submission.user_id then
+      update events
+        set turn_index = (v_event.turn_index + 1) % array_length(v_event.turn_order, 1)
+        where id = v_event.id
+        returning * into v_event;
+    end if;
+  end if;
+
+  -- Abend-Ziel erreicht? Jede Challenge kommt pro Event nur einmal in
+  -- event_challenges vor (Primary Key), die Zeilenzahl entspricht also der
+  -- Anzahl gewürfelter Challenges.
+  if v_event.target_challenge_count is not null and v_event.status <> 'finished' then
+    if (select count(*) from event_challenges where event_id = v_event.id) >= v_event.target_challenge_count then
+      update events set status = 'finished', ended_at = now() where id = v_event.id;
+    end if;
+  end if;
+end;
+$$;
+
+revoke all on function finalize_submission_approval(uuid) from public;
+grant execute on function finalize_submission_approval(uuid) to authenticated;
+
 -- ---------- Abstimmen (Security Definer) ----------
 -- Stimme + Quorum-Auswertung + Status-Update laufen atomar in einer
 -- Funktion. Das verhindert Race Conditions, wenn mehrere Mitspieler auf
@@ -519,6 +689,10 @@ begin
     select points into v_points from challenges where id = v_submission.challenge_id;
     update submissions set status = 'approved', points_awarded = coalesce(v_points, 0)
       where id = p_submission_id returning * into v_submission;
+    -- Reihum-Weiterschaltung + Abend-Ziel-Check (siehe oben) – bewusst
+    -- nach dem update, damit finalize_submission_approval() den frischen
+    -- status='approved' sieht.
+    perform finalize_submission_approval(p_submission_id);
   elsif v_rejections >= v_quorum then
     update submissions set status = 'rejected', points_awarded = 0
       where id = p_submission_id returning * into v_submission;

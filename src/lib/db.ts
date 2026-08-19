@@ -281,9 +281,84 @@ export function createEvent(input: {
     status,
     challengeIds: input.challengeIds,
     createdAt: new Date().toISOString(),
+    turnModeEnabled: false,
+    turnOrder: [],
+    turnIndex: 0,
+    challengeAssignments: {},
+    targetChallengeCount: null,
+    endedAt: null,
   };
   writeLS(LS_KEYS.events, [...all, event]);
   return event;
+}
+
+function saveAllEvents(list: GameEvent[]) {
+  writeLS(LS_KEYS.events, list);
+}
+
+/** Reihum-Modus an/aus. Beim ersten Aktivieren wird die Reihenfolge aus den
+ * aktuellen Gruppenmitgliedern befüllt (stabil danach, siehe GameEvent). */
+export function setTurnMode(eventId: string, enabled: boolean): GameEvent | undefined {
+  const all = readLS<GameEvent[]>(LS_KEYS.events, []);
+  const idx = all.findIndex((e) => e.id === eventId);
+  if (idx === -1) return undefined;
+  const event = all[idx];
+  const turnOrder = event.turnOrder.length > 0 ? event.turnOrder : listGroupMembers(event.groupId).map((m) => m.id);
+  all[idx] = { ...event, turnModeEnabled: enabled, turnOrder, turnIndex: event.turnIndex };
+  saveAllEvents(all);
+  return all[idx];
+}
+
+/** Ziel "Abend endet nach X Challenges" setzen/löschen (null = kein Ziel). */
+export function setEventTarget(eventId: string, target: number | null): GameEvent | undefined {
+  const all = readLS<GameEvent[]>(LS_KEYS.events, []);
+  const idx = all.findIndex((e) => e.id === eventId);
+  if (idx === -1) return undefined;
+  all[idx] = { ...all[idx], targetChallengeCount: target };
+  saveAllEvents(all);
+  return all[idx];
+}
+
+/** Abend manuell (oder automatisch bei erreichtem Ziel) beenden. */
+export function endEvent(eventId: string): GameEvent | undefined {
+  const all = readLS<GameEvent[]>(LS_KEYS.events, []);
+  const idx = all.findIndex((e) => e.id === eventId);
+  if (idx === -1) return undefined;
+  all[idx] = { ...all[idx], status: "finished", endedAt: new Date().toISOString() };
+  saveAllEvents(all);
+  return all[idx];
+}
+
+/** Nach einer genehmigten Submission: im Reihum-Modus zur nächsten Person
+ * weiterschalten (nur wenn diese Challenge wirklich der aktuell dran
+ * befindlichen Person zugewiesen war) + Abend automatisch beenden, wenn das
+ * Challenge-Ziel erreicht ist. Spiegelt finalize_submission_approval() in
+ * supabase/schema.sql. */
+function advanceTurnAndMaybeFinish(eventId: string, challengeId: string, userId: string) {
+  const all = readLS<GameEvent[]>(LS_KEYS.events, []);
+  const idx = all.findIndex((e) => e.id === eventId);
+  if (idx === -1) return;
+  let event = all[idx];
+
+  if (
+    event.turnModeEnabled &&
+    event.turnOrder.length > 0 &&
+    event.turnOrder[event.turnIndex] === userId &&
+    event.challengeAssignments[challengeId] === userId
+  ) {
+    event = { ...event, turnIndex: (event.turnIndex + 1) % event.turnOrder.length };
+  }
+
+  if (
+    event.targetChallengeCount !== null &&
+    event.status !== "finished" &&
+    event.challengeIds.length >= event.targetChallengeCount
+  ) {
+    event = { ...event, status: "finished", endedAt: new Date().toISOString() };
+  }
+
+  all[idx] = event;
+  saveAllEvents(all);
 }
 
 /**
@@ -384,7 +459,21 @@ export function addChallengeToEvent(eventId: string, challengeId: string): GameE
   const idx = all.findIndex((e) => e.id === eventId);
   if (idx === -1) return undefined;
   if (!all[idx].challengeIds.includes(challengeId)) {
-    all[idx] = { ...all[idx], challengeIds: [...all[idx].challengeIds, challengeId] };
+    const event = all[idx];
+    // Reihum-Modus: die frisch aufgedeckte Challenge geht an die Person, die
+    // gerade laut turnIndex dran ist – unabhängig davon, wer den Würfel
+    // tatsächlich getippt hat (siehe DiceRoller.tsx/TurnModePanel.tsx).
+    const assignedUserId =
+      event.turnModeEnabled && event.turnOrder.length > 0
+        ? event.turnOrder[event.turnIndex]
+        : undefined;
+    all[idx] = {
+      ...event,
+      challengeIds: [...event.challengeIds, challengeId],
+      challengeAssignments: assignedUserId
+        ? { ...event.challengeAssignments, [challengeId]: assignedUserId }
+        : event.challengeAssignments,
+    };
     writeLS(LS_KEYS.events, all);
   }
   return all[idx];
@@ -468,6 +557,10 @@ export function submitChallengeProof(input: {
   // auch solo direkt erlebbar ist.
   if (submission.status === "pending") {
     simulateBotVotes(submission.id);
+  } else if (submission.status === "approved") {
+    // proofType "none" wird sofort genehmigt, ohne über castVote() zu
+    // laufen – Reihum-Weiterschaltung/Abend-Ziel deshalb hier separat.
+    advanceTurnAndMaybeFinish(submission.eventId, submission.challengeId, submission.userId);
   }
   return submission;
 }
@@ -542,6 +635,9 @@ export function castVote(submissionId: string, voterId: string, approve: boolean
   const updatedSub: Submission = { ...sub, votes, status, pointsAwarded };
   all[idx] = updatedSub;
   saveAllSubmissions(all);
+  if (status === "approved") {
+    advanceTurnAndMaybeFinish(updatedSub.eventId, updatedSub.challengeId, updatedSub.userId);
+  }
   return updatedSub;
 }
 

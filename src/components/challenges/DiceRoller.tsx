@@ -4,12 +4,24 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/Button";
+import { Avatar } from "@/components/ui/Avatar";
 import { getCategory } from "@/lib/data/categories";
 import { pickChallengeForEvent, addChallengeToEvent } from "@/lib/data-layer";
 import { categoryForFace, rollDie, DICE_FACES } from "@/lib/dice";
-import { CategoryId } from "@/types";
+import { CategoryId, Challenge, Profile } from "@/types";
 
-export function DiceRoller({ eventId }: { eventId: string }) {
+/** Reihum-Modus-Kontext für den Würfel: siehe events/[id]/page.tsx, wo das
+ * aus event.turnOrder/turnIndex + den offenen Zuweisungen berechnet wird. */
+export interface TurnInfo {
+  currentTurnMember?: Profile;
+  isMyTurn: boolean;
+  /** Nicht-null, solange die Person, die dran ist, noch eine offene
+   * (nicht genehmigte) zugewiesene Challenge hat – dann darf niemand neu
+   * würfeln, sondern es geht erst mit dieser Challenge weiter. */
+  blockedChallenge?: Challenge | null;
+}
+
+export function DiceRoller({ eventId, turnInfo }: { eventId: string; turnInfo?: TurnInfo }) {
   const router = useRouter();
   const [rolling, setRolling] = useState(false);
   const [face, setFace] = useState<number | null>(null);
@@ -84,8 +96,40 @@ export function DiceRoller({ eventId }: { eventId: string }) {
     timeoutsRef.current.push(settle);
   }
 
+  if (turnInfo?.blockedChallenge) {
+    const bc = turnInfo.blockedChallenge;
+    return (
+      <div className="flex flex-col items-center gap-4 py-8 px-5 text-center">
+        <span className="text-5xl">{bc.icon}</span>
+        <div>
+          <p className="font-semibold text-sm mb-1">
+            {turnInfo.isMyTurn ? "Du bist dran! 🎲" : `${turnInfo.currentTurnMember?.name ?? "Jemand"} ist dran`}
+          </p>
+          <p className="text-muted text-xs max-w-[260px]">
+            Weiter geht&apos;s erst, wenn <strong>{bc.title}</strong>{" "}
+            {turnInfo.isMyTurn ? "erledigt" : "gemeistert"} ist – dann wird automatisch neu gewürfelt.
+          </p>
+        </div>
+        <Button size="lg" onClick={() => router.push(`/events/${eventId}/challenges/${bc.id}`)}>
+          {turnInfo.isMyTurn ? "Jetzt spielen 🚀" : "Challenge ansehen"}
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center gap-5 py-8">
+      {turnInfo?.currentTurnMember && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center gap-2 rounded-full px-3 py-1.5 bg-white/5 text-xs font-semibold"
+        >
+          <Avatar emoji={turnInfo.currentTurnMember.avatarEmoji} size="sm" />
+          {turnInfo.isMyTurn ? "🔄 Du bist dran" : `🔄 ${turnInfo.currentTurnMember.name} ist dran`}
+        </motion.div>
+      )}
+
       <motion.div
         animate={
           rolling

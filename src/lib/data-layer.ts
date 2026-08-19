@@ -197,6 +197,40 @@ export async function computeRanking(groupId: string): Promise<RankingEntry[]> {
   return isRemoteMode() ? remote.computeRanking(groupId) : local.computeRanking(groupId);
 }
 
+// ---------------------------- Reihum-Modus & Abend-Ziel ----------------------------
+// Funktioniert bewusst in BEIDEN Modi (lokal + Supabase), anders als
+// Party-Push/Bingo weiter unten – Reihum-Modus und "Abend beenden" sind
+// auch ganz ohne Backend sinnvoll.
+
+export async function setTurnMode(eventId: string, enabled: boolean): Promise<GameEvent | undefined> {
+  return isRemoteMode() ? remote.setTurnMode(eventId, enabled) : local.setTurnMode(eventId, enabled);
+}
+
+export async function setEventTarget(
+  eventId: string,
+  target: number | null
+): Promise<GameEvent | undefined> {
+  return isRemoteMode()
+    ? remote.setEventTarget(eventId, target)
+    : local.setEventTarget(eventId, target);
+}
+
+export async function endEvent(eventId: string): Promise<GameEvent | undefined> {
+  return isRemoteMode() ? remote.endEvent(eventId) : local.endEvent(eventId);
+}
+
+// ---------------------------- Push-Benachrichtigung bei abgeschlossener Challenge ----------------------------
+// "QuizDuell-Style": sobald irgendjemandes Challenge genehmigt wird,
+// bekommen alle anderen Gruppenmitglieder mit aktiver Push-Subscription
+// eine Benachrichtigung (siehe notify-challenge-completed Edge Function).
+// Nutzt dieselbe push_subscriptions-Tabelle/denselben Umschalter wie
+// notifyVoteRequest oben – kein separates Opt-in nötig.
+
+export async function notifyChallengeCompleted(submissionId: string): Promise<void> {
+  if (!isRemoteMode()) return;
+  return remote.notifyChallengeCompleted(submissionId);
+}
+
 /**
  * Live-Updates für eine Submission über Supabase Realtime. Im Demo-Modus
  * gibt es kein Realtime – Aufrufer bekommen dort eine No-Op-Unsubscribe-
