@@ -334,11 +334,23 @@ export async function deleteGroup(groupId: string): Promise<void> {
  * Refetch beim Aufrufer aus (spiegelt subscribeToSubmission) – RLS sorgt
  * weiterhin dafür, dass beim Refetch nur die eigenen Gruppen ankommen.
  * Damit sehen andere Mitglieder Beitritte/Austritte/Löschungen live,
- * ohne dass die App manuell neu geladen werden muss. */
+ * ohne dass die App manuell neu geladen werden muss.
+ *
+ * WICHTIG: supabase.channel(topic) gibt bei GLEICHEM Topic-String den
+ * bereits bestehenden (und meist schon .subscribe()'ten) Channel zurück,
+ * statt einen neuen zu erzeugen (siehe RealtimeClient.channel() im SDK).
+ * Diese Funktion wird aber von mehreren Stellen GLEICHZEITIG aufgerufen
+ * (useGroups(), usePrimaryGroup(), und pro Gruppenkarte in groups/page.tsx
+ * je ein eigenes Abo) – mit einem festen Namen wie früher "groups-sync"
+ * bekommt jeder Aufruf ab dem zweiten denselben, schon abonnierten
+ * Channel zurück, und .on(...) danach wirft zur Laufzeit "cannot add
+ * postgres_changes callbacks ... after subscribe()". Ein pro Aufruf
+ * eindeutiger Topic-Name (uid()) gibt jedem Aufrufer garantiert seinen
+ * eigenen Channel. */
 export function subscribeToGroups(onChange: () => void): () => void {
   const supabase = getSupabaseClient();
   const channel = supabase
-    .channel("groups-sync")
+    .channel(`groups-sync-${uid()}`)
     .on("postgres_changes", { event: "*", schema: "public", table: "group_members" }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "groups" }, onChange)
     .subscribe();
@@ -714,7 +726,11 @@ export function subscribeToSubmission(
 ): () => void {
   const supabase = getSupabaseClient();
   const channel = supabase
-    .channel(`submission-${submissionId}`)
+    // uid()-Suffix: siehe ausführlichen Kommentar bei subscribeToGroups()
+    // weiter oben - verhindert einen kollidierenden, schon abonnierten
+    // Channel, falls dieselbe Submission-ID (theoretisch) von mehr als
+    // einer Stelle gleichzeitig abonniert wird.
+    .channel(`submission-${submissionId}-${uid()}`)
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "submissions", filter: `id=eq.${submissionId}` },
@@ -767,7 +783,8 @@ export function subscribeToEventSubmissions(
     onChange(await listSubmissions(eventId));
   };
   const channel = supabase
-    .channel(`event-submissions-${eventId}`)
+    // uid()-Suffix: siehe subscribeToGroups() weiter oben.
+    .channel(`event-submissions-${eventId}-${uid()}`)
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "submissions", filter: `event_id=eq.${eventId}` },
@@ -1087,7 +1104,8 @@ export function subscribeToBingo(
     onChange(await getBingoSnapshot(eventId));
   };
   const channel = supabase
-    .channel(`bingo-${bingoId}`)
+    // uid()-Suffix: siehe subscribeToGroups() weiter oben.
+    .channel(`bingo-${bingoId}-${uid()}`)
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "party_bingo", filter: `id=eq.${bingoId}` },
