@@ -65,13 +65,25 @@ gebaut und konnte daher nicht live gegen ein echtes Projekt getestet
 werden – bitte einmal mit zwei Geräten/Browser-Profilen durchklicken, bevor
 darauf eine echte Party läuft (Details dazu ebenfalls in `SETUP.md`).
 
-## 5. (Optional) Automatische Push-Challenges im Party-Modus einrichten
+## 5. (Optional) Push-Benachrichtigungen einrichten
 
 Braucht Supabase (Schritt 4) und die [Supabase CLI](https://supabase.com/docs/guides/cli).
-Läuft komplett serverseitig – funktioniert auch, wenn alle Teilnehmer die
-PWA geschlossen haben. Ohne diese Schritte funktioniert die App ganz normal
-weiter, nur der Schalter "🔔 Automatische Challenges" im Party-Modus bleibt
-ohne Wirkung.
+Es gibt zwei unabhängige Push-Funktionen, die sich dieselben VAPID-Secrets
+teilen:
+
+- **🗳️ Abstimmungs-Benachrichtigungen** (`notify-vote-request`): sobald
+  jemand eine Challenge samt Beweis einreicht, bekommen alle anderen
+  Gruppenmitglieder mit aktiviertem Schalter sofort eine Push-
+  Benachrichtigung ("Mia hat eingereicht!") und können direkt zum
+  Abstimmen springen – auch bei geschlossener PWA. Wird DIREKT vom Client
+  ausgelöst, braucht deshalb **kein** `pg_cron`/`pg_net`.
+- **🔔 Automatische Challenges** (`party-push-tick`): schickt im Party-
+  Modus automatisch neue Challenges im gewählten Takt, komplett
+  serverseitig per Scheduler. Braucht zusätzlich `pg_cron`/`pg_net`
+  (Schritt 2 + 5 unten).
+
+Ohne diese Schritte funktioniert die App ganz normal weiter, nur die
+beiden Push-Schalter bleiben ohne Wirkung.
 
 1. **VAPID-Schlüsselpaar erzeugen** (einmalig, lokal, keine Netzwerkverbindung
    nötig):
@@ -80,19 +92,25 @@ ohne Wirkung.
    ```
    Liefert einen `Public Key` und einen `Private Key`.
 
-2. **`pg_cron` und `pg_net` aktivieren** – im Supabase Dashboard unter
-   *Database → Extensions* beide suchen und aktivieren (oder per SQL-Editor:
+2. **Nur für "Automatische Challenges": `pg_cron` und `pg_net` aktivieren**
+   – im Supabase Dashboard unter *Database → Extensions* beide suchen und
+   aktivieren (oder per SQL-Editor:
    `create extension if not exists pg_cron; create extension if not exists pg_net;`).
+   Für die Abstimmungs-Benachrichtigungen kann dieser Schritt übersprungen
+   werden.
 
-3. **Edge Function deployen** (aus dem entpackten Projektordner):
+3. **Beide Edge Functions deployen** (aus dem entpackten Projektordner):
    ```bash
    supabase login
    supabase link --project-ref <dein-project-ref>
+   supabase functions deploy notify-vote-request
    supabase functions deploy party-push-tick
    ```
+   (Nur eine der beiden gewünscht? Einfach nur die passende Zeile
+   ausführen – beide sind unabhängig voneinander.)
 
-4. **Secrets für die Edge Function setzen** (der Private Key darf NIEMALS
-   ins Frontend/`.env.local`, nur hierhin):
+4. **Secrets für die Edge Functions setzen** (gelten für beide Funktionen,
+   der Private Key darf NIEMALS ins Frontend/`.env.local`, nur hierhin):
    ```bash
    supabase secrets set \
      VAPID_PUBLIC_KEY=<Public Key aus Schritt 1> \
@@ -100,9 +118,10 @@ ohne Wirkung.
      VAPID_SUBJECT=mailto:deine@email.de
    ```
 
-5. **Cron-Zeitplan anlegen** – im SQL-Editor deines Supabase-Projekts (Werte
-   aus `<project-ref>` und deinem `service_role`-Key einsetzen, siehe auch
-   der auskommentierte Block am Ende von `supabase/schema.sql`):
+5. **Nur für "Automatische Challenges": Cron-Zeitplan anlegen** – im
+   SQL-Editor deines Supabase-Projekts (Werte aus `<project-ref>` und
+   deinem `service_role`-Key einsetzen, siehe auch der auskommentierte
+   Block am Ende von `supabase/schema.sql`):
    ```sql
    select cron.schedule(
      'party-push-tick',
@@ -122,13 +141,20 @@ ohne Wirkung.
 
 6. **Client-Env-Var setzen** – in Vercel (und/oder `.env.local`):
    `NEXT_PUBLIC_VAPID_PUBLIC_KEY=<Public Key aus Schritt 1>`, dann redeployen.
+   Gilt für beide Push-Funktionen.
 
-7. **Testen**: Party starten (Modi → Abend starten), im Event-Bildschirm den
-   "🔔 Automatische Challenges"-Schalter aktivieren (Browser fragt nach der
-   Notification-Berechtigung), Intervall wählen. Die erste Push-Challenge
-   kommt beim nächsten Scheduler-Tick (max. 1 Minute, danach im gewählten
-   Intervall). Fehlt eine Notification, zuerst `supabase functions logs
-   party-push-tick` prüfen.
+7. **Testen**:
+   - Abstimmungs-Benachrichtigungen: ein beliebiges Event öffnen, "🗳️
+     Abstimmungs-Benachrichtigungen" aktivieren (Browser fragt nach der
+     Notification-Berechtigung), auf einem ANDEREN Gerät/Profil eine
+     Challenge mit Beweis einreichen – die Push sollte sofort ankommen.
+     Fehlt sie, `supabase functions logs notify-vote-request` prüfen.
+   - Automatische Challenges: Party starten (Modi → Abend starten), im
+     Event-Bildschirm den "🔔 Automatische Challenges"-Schalter
+     aktivieren, Intervall wählen. Die erste Push-Challenge kommt beim
+     nächsten Scheduler-Tick (max. 1 Minute, danach im gewählten
+     Intervall). Fehlt eine Notification, `supabase functions logs
+     party-push-tick` prüfen.
 
 Auch dieser Teil konnte aus derselben netzwerklosen Umgebung heraus nicht
 live gegen einen echten Push-Dienst getestet werden – Edge-Function-Code

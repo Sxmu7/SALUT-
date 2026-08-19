@@ -8,6 +8,7 @@ import { TopBar } from "@/components/layout/TopBar";
 import { ChallengeCard } from "@/components/challenges/ChallengeCard";
 import { DiceRoller } from "@/components/challenges/DiceRoller";
 import { PartyPushToggle } from "@/components/challenges/PartyPushToggle";
+import { VoteNotifyToggle } from "@/components/challenges/VoteNotifyToggle";
 import { PendingVotes } from "@/components/challenges/PendingVotes";
 // PartyBingoPanel ist vorerst deaktiviert (siehe Kommentar unten) - Import
 // bewusst entfernt, um keinen "unused import"-Lint-Fehler zu haben.
@@ -116,6 +117,7 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
           </motion.div>
         )}
 
+        {isRemoteMode() && <VoteNotifyToggle />}
         {event.type === "party" && isRemoteMode() && <PartyPushToggle eventId={event.id} />}
         {/* Party-Bingo ist vorerst wieder ausgeblendet (auf Wunsch) - Code,
             Schema und Tests bleiben erhalten, nur der Einstiegspunkt hier

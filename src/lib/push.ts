@@ -76,6 +76,40 @@ export async function subscribeToPush(): Promise<RawPushSubscription> {
 }
 
 /**
+ * Prüft, ob dieses Gerät/dieser Browser bereits eine aktive Push-
+ * Subscription hat, OHNE dabei die Notification-Berechtigung abzufragen
+ * (reine Leseoperation) – damit UI-Schalter (z.B. "Abstimmungs-
+ * Benachrichtigungen") beim Laden ihren echten Zustand zeigen können,
+ * statt immer bei "aus" zu starten.
+ */
+export async function getExistingPushSubscription(): Promise<RawPushSubscription | null> {
+  if (typeof window === "undefined" || !("serviceWorker" in navigator)) return null;
+  const registration = await navigator.serviceWorker.getRegistration("/sw.js");
+  if (!registration) return null;
+  const subscription = await registration.pushManager.getSubscription();
+  if (!subscription) return null;
+  const json = subscription.toJSON();
+  if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return null;
+  return { endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth };
+}
+
+/**
+ * Meldet dieses Gerät browserseitig von Push ab. Gibt den zuletzt
+ * genutzten Endpoint zurück (damit die aufrufende Seite die zugehörige
+ * Server-Zeile per deletePushSubscription() entfernen kann), oder null,
+ * wenn ohnehin keine Subscription bestand.
+ */
+export async function unsubscribeFromPush(): Promise<string | null> {
+  const existing = await getExistingPushSubscription();
+  if (!existing) return null;
+  if (typeof window === "undefined" || !("serviceWorker" in navigator)) return null;
+  const registration = await navigator.serviceWorker.getRegistration("/sw.js");
+  const subscription = await registration?.pushManager.getSubscription();
+  await subscription?.unsubscribe();
+  return existing.endpoint;
+}
+
+/**
  * Hört auf Nachrichten vom Service Worker (siehe public/sw.js,
  * notificationclick) und ruft den übergebenen Navigations-Callback auf,
  * damit ein Notification-Klick die bestehende Next.js-Routing-Logik der

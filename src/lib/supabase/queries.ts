@@ -665,7 +665,19 @@ export async function submitChallengeProof(input: {
     .select()
     .single();
   if (error) raise(error);
-  return mapSubmissionRow(data);
+  const created = await mapSubmissionRow(data);
+
+  // Andere Mitglieder per Push benachrichtigen, dass eine neue Einreichung
+  // auf ihre Stimme wartet ("Wartet auf deine Stimme" auf der Event-Seite,
+  // siehe PendingVotes.tsx) - nur nötig, wenn wirklich abgestimmt werden
+  // muss (proofType "none" ist sofort "approved", ohne dass jemand
+  // abstimmt). Bewusst nicht awaited/blockierend: die Einreichung selbst
+  // ist fertig und soll nicht auf den Push-Versand warten.
+  if (created.status === "pending") {
+    notifyVoteRequest(created.id);
+  }
+
+  return created;
 }
 
 /**
@@ -893,6 +905,35 @@ export async function savePushSubscription(sub: {
     { onConflict: "endpoint" }
   );
   if (error) raise(error);
+}
+
+/** Push-Benachrichtigungen auf diesem Gerät wieder abmelden (z.B. wenn der
+ * Nutzer den "Abstimmungs-Benachrichtigungen"-Schalter ausschaltet). Die
+ * RLS-Policy erlaubt ohnehin nur das Löschen der eigenen Zeilen, der
+ * endpoint-Filter grenzt zusätzlich auf genau dieses Gerät ein. */
+export async function deletePushSubscription(endpoint: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("push_subscriptions").delete().eq("endpoint", endpoint);
+  if (error) raise(error);
+}
+
+/**
+ * Löst die "Jemand hat eine Challenge eingereicht – bitte abstimmen"-Push-
+ * Benachrichtigung aus (Edge Function notify-vote-request, siehe dort).
+ * Bewusst best-effort: kein Wurf bei Fehlern (fehlende Edge Function,
+ * fehlende VAPID-Secrets, Netzwerkfehler, ...) – das Einreichen selbst
+ * darf davon nicht abhängen, die Push-Benachrichtigung ist ein "nice to
+ * have" obendrauf, kein kritischer Teil des Abstimmungs-Flows (der
+ * funktioniert über die PendingVotes-UI/Realtime-Sync ohnehin auch ohne
+ * Push).
+ */
+export async function notifyVoteRequest(submissionId: string): Promise<void> {
+  try {
+    const supabase = getSupabaseClient();
+    await supabase.functions.invoke("notify-vote-request", { body: { submissionId } });
+  } catch (err) {
+    console.warn("notifyVoteRequest fehlgeschlagen (nicht kritisch):", err);
+  }
 }
 
 // ---------------------------- Party-Bingo (Party-Modus) ----------------------------

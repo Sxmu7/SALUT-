@@ -259,6 +259,21 @@ export async function savePushSubscription(sub: {
   return remote.savePushSubscription(sub);
 }
 
+export async function deletePushSubscription(endpoint: string): Promise<void> {
+  requireRemoteMode("Benachrichtigungen");
+  return remote.deletePushSubscription(endpoint);
+}
+
+// ---------------------------- Push-Benachrichtigung bei neuer Einreichung ----------------------------
+// Wird automatisch von submitChallengeProof() im Supabase-Modus ausgelöst
+// (siehe queries.ts) - hier nur der Vollständigkeit halber als Re-Export,
+// falls eine Seite sie mal manuell auslösen möchte (z.B. Retry-Button).
+
+export async function notifyVoteRequest(submissionId: string): Promise<void> {
+  if (!isRemoteMode()) return;
+  return remote.notifyVoteRequest(submissionId);
+}
+
 // ---------------------------- Party-Bingo (Party-Modus) ----------------------------
 // Kartenerzeugung und Gewinner-Ermittlung laufen serverseitig (siehe
 // schema.sql) und brauchen deshalb ein echtes Supabase-Projekt – im
