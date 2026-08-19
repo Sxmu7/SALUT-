@@ -27,10 +27,15 @@ export default function DashboardPage() {
   const [birthdayToday, setBirthdayToday] = useState(false);
 
   useEffect(() => {
-    if (profileReady && !onboarded) {
+    // "&& !profile" ist eine zweite, unabhängige Absicherung gegen den
+    // "nach dem Backgrounden zurück im Intro"-Bug (siehe useProfile.ts):
+    // ein vorhandenes Profil zählt als Beweis für "schon onboarded",
+    // selbst falls das separate onboarded-Flag durch einen Storage-Timing-
+    // Fehler mal fälschlich "false" liefern sollte.
+    if (profileReady && !onboarded && !profile) {
       router.replace("/onboarding");
     }
-  }, [profileReady, onboarded, router]);
+  }, [profileReady, onboarded, profile, router]);
 
   useEffect(() => {
     if (!profile) return;

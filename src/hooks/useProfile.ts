@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getCurrentProfile, createOrUpdateProfile, isOnboarded } from "@/lib/data-layer";
+import { LS_KEYS, writeLS } from "@/lib/storage";
 import { Profile } from "@/types";
+
+/** Siehe Kommentar in useProfile() weiter unten: repariert das separate
+ * "onboarded"-Geräte-Flag, falls es trotz vorhandenem Profil fehlt. */
+function writeOnboardedFlag() {
+  writeLS(LS_KEYS.onboarded, true);
+}
 
 // Modul-weiter Cache (lebt außerhalb der Komponente, also über
 // Mount/Unmount hinweg für die Dauer des Browser-Tabs). Ohne das zeigt
@@ -38,8 +45,27 @@ export function useProfile() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [p, o] = await Promise.all([getCurrentProfile(), isOnboarded()]);
+      const [p, oFlag] = await Promise.all([getCurrentProfile(), isOnboarded()]);
       if (cancelled) return;
+
+      // Selbstheilung gegen den "nach dem Backgrounden zurück im Intro"-Bug:
+      // "onboarded" ist ein eigenes, rein lokales Geräte-Flag (siehe
+      // isOnboarded() in lib/db.ts), getrennt vom eigentlichen Profil. Auf
+      // iOS wird eine im Hintergrund liegende Web-App/PWA vom System
+      // gelegentlich komplett neu geladen (kein "Resume" wie bei nativen
+      // Apps) - kommt genau in diesem Moment/durch ein Storage-Timing-
+      // Problem das Flag als "false" zurück, obwohl längst ein echtes
+      // Profil existiert, hat das bisher fälschlich zurück zu /onboarding
+      // geschickt (siehe dashboard/page.tsx) - gefühlt ein Endlosloop, weil
+      // es bei jedem Zurückkehren aus dem Hintergrund erneut passieren
+      // konnte. Ein existierendes Profil ist der zuverlässigere Beweis
+      // "diese Person hat sich schon eingerichtet" – das Flag wird dann
+      // gleich mit repariert, statt bei jedem Reload erneut zu stolpern.
+      const o = oFlag || Boolean(p);
+      if (p && !oFlag) {
+        writeOnboardedFlag();
+      }
+
       cachedProfile = p;
       cachedOnboarded = o;
       hasLoadedOnce = true;

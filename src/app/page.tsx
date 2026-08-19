@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Typewriter } from "@/components/ui/Typewriter";
 import { LogoMark } from "@/components/brand/Logo";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
-import { isOnboarded } from "@/lib/data-layer";
+import { isOnboarded, getCurrentProfile } from "@/lib/data-layer";
 
 // Kurz, einfach, ohne Vergleiche zu anderen Apps – verständlich für jeden.
 // Wird nur beim allerersten Öffnen gezeigt (siehe `returning` unten).
@@ -30,13 +30,25 @@ export default function LandingPage() {
 
   useEffect(() => {
     (async () => {
-      setReturning(await isOnboarded());
+      // Wie in useProfile.ts: ein vorhandenes Profil zählt zusätzlich zum
+      // separaten "onboarded"-Flag als Beweis für "schon eingerichtet" –
+      // schützt gegen denselben Storage-Timing-Fall, der sonst nach dem
+      // Zurückkehren aus dem Hintergrund fälschlich wieder die
+      // Erstnutzer-Intro statt "Tippen zum Überspringen" zeigen könnte.
+      const [onboardedFlag, profile] = await Promise.all([isOnboarded(), getCurrentProfile()]);
+      setReturning(onboardedFlag || Boolean(profile));
       setReady(true);
     })();
   }, []);
 
   function goToApp() {
-    router.push(returning ? "/dashboard" : "/onboarding");
+    // replace statt push: "/" ist bei einem Neuladen aus dem Hintergrund
+    // (iOS lädt eine im Hintergrund liegende Web-App/PWA gelegentlich
+    // komplett neu) oft kein bewusst gewählter Schritt, sondern nur der
+    // technische Startpunkt. Mit push würde "/" als Verlaufseintrag stehen
+    // bleiben und der Zurück-Button könnte hierher zurückspringen – mit
+    // replace verschwindet die Intro-Maske sauber aus der Historie.
+    router.replace(returning ? "/dashboard" : "/onboarding");
   }
 
   // Wiederkehrende Nutzer: Marke kurz animiert zeigen, dann ohne
