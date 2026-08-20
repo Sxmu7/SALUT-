@@ -27,4 +27,7 @@ export const LS_KEYS = {
   submissions: "salut:submissions",
   customChallenges: "salut:customChallenges",
   onboarded: "salut:onboarded",
+  /** Dark/Light für den Kollegen-Modus – rein optisch, unabhängig vom Rest
+   * der App (die aktuell nur Dark kennt), siehe app/coworker/layout.tsx. */
+  coworkerTheme: "salut:coworkerTheme",
 } as const;

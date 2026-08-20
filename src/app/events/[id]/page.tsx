@@ -51,13 +51,16 @@ export default function EventPage({ params }: { params: Promise<{ id: string }> 
   // Für die Abstimmungskarten (PendingVotes): Name + Avatar des
   // Einreichenden anzeigen zu können.
   useEffect(() => {
-    if (!event) {
+    // groupId ist nur bei Trinkspiel-Events gesetzt (diese Seite ist nie
+    // für Kollegen-Events zuständig, die haben ihre eigene Route unter
+    // /coworker, siehe GameEvent.groupId-Kommentar in types/index.ts).
+    if (!event || !event.groupId) {
       setMembers([]);
       return;
     }
     let cancelled = false;
     (async () => {
-      const m = await listGroupMembers(event.groupId);
+      const m = await listGroupMembers(event.groupId as string);
       if (!cancelled) setMembers(m);
     })();
     return () => {

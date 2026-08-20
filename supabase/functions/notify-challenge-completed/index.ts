@@ -89,26 +89,34 @@ Deno.serve(async (req) => {
 
   const { data: event, error: eventError } = await supabase
     .from("events")
-    .select("group_id, turn_mode_enabled, turn_order, turn_index")
+    .select("group_id, coworker_group_id, turn_mode_enabled, turn_order, turn_index")
     .eq("id", submission.event_id)
     .maybeSingle();
   if (eventError) return json({ error: eventError.message }, 500);
   if (!event) return json({ error: "event_not_found" }, 404);
 
+  // Kollegen-Modus (coworker_group_id gesetzt) nutzt den getrennten
+  // Challenge-Katalog + Mitgliederkreis, sonst wie gehabt den Trinkspiel-Pfad.
+  // Reihum-Modus (turn_mode_enabled) existiert nur im Trinkspiel-Pfad, im
+  // Kollegen-Modus bleibt nextTurnUserId weiter unten immer null.
+  const isCoworker = Boolean(event.coworker_group_id);
+  const groupTable = isCoworker ? "coworker_group_members" : "group_members";
+  const groupIdValue = (isCoworker ? event.coworker_group_id : event.group_id) as string;
+
   // Aufrufer muss Mitglied derselben Gruppe sein – anders als bei
   // notify-vote-request nicht zwingend der Einreichende selbst (kann auch
   // der Mitspieler sein, dessen Stimme die Genehmigung ausgelöst hat).
   const { data: callerMembership } = await supabase
-    .from("group_members")
+    .from(groupTable)
     .select("user_id")
-    .eq("group_id", event.group_id as string)
+    .eq("group_id", groupIdValue)
     .eq("user_id", user.id)
     .maybeSingle();
   if (!callerMembership) return json({ error: "forbidden" }, 403);
 
   const [{ data: challenge }, { data: submitter }] = await Promise.all([
     supabase
-      .from("challenges")
+      .from(isCoworker ? "coworker_challenges" : "challenges")
       .select("title, icon")
       .eq("id", submission.challenge_id)
       .maybeSingle(),
@@ -116,9 +124,9 @@ Deno.serve(async (req) => {
   ]);
 
   const { data: members, error: membersError } = await supabase
-    .from("group_members")
+    .from(groupTable)
     .select("user_id")
-    .eq("group_id", event.group_id as string)
+    .eq("group_id", groupIdValue)
     .neq("user_id", submission.user_id);
   if (membersError) return json({ error: membersError.message }, 500);
 

@@ -89,17 +89,29 @@ Deno.serve(async (req) => {
     return json({ sent: 0, reason: "not_pending" });
   }
 
-  const [{ data: challenge }, { data: submitter }, { data: event }] = await Promise.all([
-    supabase.from("challenges").select("title, icon").eq("id", submission.challenge_id).maybeSingle(),
-    supabase.from("profiles").select("name").eq("id", submission.user_id).maybeSingle(),
-    supabase.from("events").select("group_id").eq("id", submission.event_id).maybeSingle(),
-  ]);
+  const { data: event } = await supabase
+    .from("events")
+    .select("group_id, coworker_group_id")
+    .eq("id", submission.event_id)
+    .maybeSingle();
   if (!event) return json({ error: "event_not_found" }, 404);
 
+  // Kollegen-Modus (coworker_group_id gesetzt) nutzt den getrennten
+  // Challenge-Katalog + Mitgliederkreis, sonst wie gehabt den Trinkspiel-Pfad.
+  const isCoworker = Boolean(event.coworker_group_id);
+  const [{ data: challenge }, { data: submitter }] = await Promise.all([
+    supabase
+      .from(isCoworker ? "coworker_challenges" : "challenges")
+      .select("title, icon")
+      .eq("id", submission.challenge_id)
+      .maybeSingle(),
+    supabase.from("profiles").select("name").eq("id", submission.user_id).maybeSingle(),
+  ]);
+
   const { data: members, error: membersError } = await supabase
-    .from("group_members")
+    .from(isCoworker ? "coworker_group_members" : "group_members")
     .select("user_id")
-    .eq("group_id", event.group_id as string)
+    .eq("group_id", (isCoworker ? event.coworker_group_id : event.group_id) as string)
     .neq("user_id", submission.user_id);
   if (membersError) return json({ error: membersError.message }, 500);
 

@@ -23,6 +23,8 @@ import {
   PartyBingoConfig,
   BingoSnapshot,
   BingoWinCondition,
+  CoworkerGroup,
+  CoworkerChallenge,
 } from "@/types";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import * as local from "@/lib/db";
@@ -352,4 +354,87 @@ export function subscribeToBingo(
 ): () => void {
   if (!isRemoteMode()) return () => {};
   return remote.subscribeToBingo(eventId, bingoId, onChange);
+}
+
+// ---------------------------- Kollegen-Modus (Co-Worker-Modus) ----------------------------
+// Komplett getrennt vom Trinkspiel-Teil der App (eigene Gruppen, eigener
+// Challenge-Katalog, eigene Events) UND wie Party-Push/Bingo "Nur mit
+// Supabase" (der automatische 5-Minuten-Rhythmus läuft serverseitig per
+// pg_cron + Edge Function coworker-push-tick, siehe schema.sql) – deshalb
+// hier durchgehend requireRemoteMode() statt lokal/remote-Weiche. Die UI
+// (Dashboard-Einstieg, siehe /coworker) blendet den Kollegen-Modus im
+// Demo-Modus entsprechend aus/zeigt einen Hinweis, diese Funktionen werfen
+// also im Normalfall dort nie.
+
+export async function listCoworkerGroups(): Promise<CoworkerGroup[]> {
+  requireRemoteMode("Kollegen-Modus");
+  return remote.listCoworkerGroups();
+}
+
+export async function createCoworkerGroup(name: string, emoji: string): Promise<CoworkerGroup> {
+  requireRemoteMode("Kollegen-Modus");
+  return remote.createCoworkerGroup(name, emoji);
+}
+
+export async function joinCoworkerGroupByCode(code: string): Promise<CoworkerGroup | null> {
+  requireRemoteMode("Kollegen-Modus");
+  return remote.joinCoworkerGroupByCode(code);
+}
+
+export async function listCoworkerGroupMembers(groupId: string): Promise<Profile[]> {
+  requireRemoteMode("Kollegen-Modus");
+  return remote.listCoworkerGroupMembers(groupId);
+}
+
+export async function leaveCoworkerGroup(groupId: string): Promise<void> {
+  requireRemoteMode("Kollegen-Modus");
+  return remote.leaveCoworkerGroup(groupId);
+}
+
+export async function kickCoworkerGroupMember(groupId: string, userId: string): Promise<void> {
+  requireRemoteMode("Kollegen-Modus");
+  return remote.kickCoworkerGroupMember(groupId, userId);
+}
+
+export async function deleteCoworkerGroup(groupId: string): Promise<void> {
+  requireRemoteMode("Kollegen-Modus");
+  return remote.deleteCoworkerGroup(groupId);
+}
+
+/** Live-Updates für Kollegen-Gruppen/Mitgliedschaften. */
+export function subscribeToCoworkerGroups(onChange: () => void): () => void {
+  if (!isRemoteMode()) return () => {};
+  return remote.subscribeToCoworkerGroups(onChange);
+}
+
+export async function listCoworkerChallenges(): Promise<CoworkerChallenge[]> {
+  requireRemoteMode("Kollegen-Modus");
+  return remote.listCoworkerChallenges();
+}
+
+export async function getAnyCoworkerChallenge(id: string): Promise<CoworkerChallenge | undefined> {
+  requireRemoteMode("Kollegen-Modus");
+  return remote.getAnyCoworkerChallenge(id);
+}
+
+export async function listCoworkerEvents(coworkerGroupId: string): Promise<GameEvent[]> {
+  requireRemoteMode("Kollegen-Modus");
+  return remote.listCoworkerEvents(coworkerGroupId);
+}
+
+export async function getOrCreateCoworkerEvent(coworkerGroupId: string): Promise<GameEvent> {
+  requireRemoteMode("Kollegen-Modus");
+  return remote.getOrCreateCoworkerEvent(coworkerGroupId);
+}
+
+export async function claimCoworkerChallenge(eventId: string, challengeId: string): Promise<void> {
+  requireRemoteMode("Kollegen-Modus");
+  return remote.claimCoworkerChallenge(eventId, challengeId);
+}
+
+/** Live-Updates für den Kollegen-Feed eines Events (neue automatisch
+ * verschickte Challenges + wer welche geclaimt hat). */
+export function subscribeToEventChallenges(eventId: string, onChange: () => void): () => void {
+  if (!isRemoteMode()) return () => {};
+  return remote.subscribeToEventChallenges(eventId, onChange);
 }

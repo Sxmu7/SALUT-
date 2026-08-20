@@ -51,12 +51,17 @@ export interface Group {
   createdAt: string;
 }
 
-export type EventType = "birthday" | "custom" | "party";
+export type EventType = "birthday" | "custom" | "party" | "coworker";
 export type EventStatus = "upcoming" | "live" | "finished";
 
 export interface GameEvent {
   id: string;
-  groupId: string;
+  /** Nur bei Trinkspiel-Events gesetzt (type != "coworker"). Ein Event
+   * gehört immer entweder zu einer Trinkspiel-Gruppe (groupId) ODER zu
+   * einer Kollegen-Gruppe (coworkerGroupId), nie beides. */
+  groupId: string | null;
+  /** Nur bei Kollegen-Events gesetzt (type === "coworker"), siehe groupId. */
+  coworkerGroupId: string | null;
   title: string;
   type: EventType;
   emoji: string;
@@ -88,6 +93,46 @@ export interface GameEvent {
   /** Gesetzt, sobald der Abend manuell oder automatisch (Ziel erreicht)
    * beendet wurde. */
   endedAt: string | null;
+  /** Nur bei Kollegen-Events: wann die nächste automatische Challenge
+   * verschickt wird (Mo-Fr 09:00-12:30 & 14:00-17:00, Europe/Berlin) – siehe
+   * next_coworker_push_time() in schema.sql. Für die Countdown-Anzeige im
+   * Kollegen-Feed. */
+  coworkerNextPushAt: string | null;
+}
+
+/**
+ * Kollegen-Gruppe (Co-Worker-Modus). Bewusst komplett getrennt von Group/
+ * groups – Arbeitskolleg:innen sollen nicht automatisch in denselben
+ * Gruppen wie Trinkspiel-Freunde landen (siehe schema.sql,
+ * coworker_groups/coworker_group_members). Nur im Supabase-Modus
+ * verfügbar.
+ */
+export interface CoworkerGroup {
+  id: string;
+  name: string;
+  emoji: string;
+  inviteCode: string;
+  ownerId: string;
+  createdAt: string;
+}
+
+/**
+ * Eine Challenge aus dem komplett separaten, alkoholfreien Arbeitsalltag-
+ * Katalog (siehe schema.sql, coworker_challenges) – bewusst kein
+ * categoryId wie bei Challenge, da es im Kollegen-Modus keine Kategorien
+ * gibt.
+ */
+export interface CoworkerChallenge {
+  id: string;
+  title: string;
+  description: string;
+  points: number;
+  difficulty: Difficulty;
+  proofType: ProofType;
+  icon: string;
+  animation: Challenge["animation"];
+  isCustom?: boolean;
+  source?: "fixed" | "manual" | "ai";
 }
 
 export type SubmissionStatus = "pending" | "approved" | "rejected";

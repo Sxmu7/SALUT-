@@ -233,3 +233,52 @@ textarea:focus {
     display: none;
   }
 }
+
+/* ---------- Kollegen-Modus (Co-Worker): eigene, in sich geschlossene
+   Designsprache in Sparkassen-Rot (HKS 13 / #DE002E) statt des lila/pinken
+   Party-Akzents, damit auf Anhieb klar ist "das ist der Arbeits-Modus".
+   Wird nur innerhalb von /coworker per .theme-coworker + .dark/.light auf
+   einem Wrapper-Element gesetzt (siehe app/coworker/layout.tsx) – überschreibt
+   dort einfach dieselben CSS-Variablen aus :root oben, alle bestehenden
+   Komponenten (Card, Button, gradient-text, ...) funktionieren unverändert. ---------- */
+.theme-coworker {
+  --accent: #de002e;
+  --accent-2: #ff2d55;
+  --accent-3: #ff8a3d;
+  --gradient-party: linear-gradient(135deg, #de002e 0%, #ff2d55 55%, #ff8a3d 100%);
+  --gradient-accent: linear-gradient(135deg, #ff2d55 0%, #de002e 100%);
+}
+
+.theme-coworker.dark {
+  --background: #0d0405;
+  --surface: #170709;
+  --surface-2: #220b0e;
+  --foreground: #f7f0f0;
+  --muted: #b58f92;
+  --border: rgba(255, 255, 255, 0.09);
+  color-scheme: dark;
+}
+
+.theme-coworker.light {
+  --background: #fdf8f8;
+  --surface: #ffffff;
+  --surface-2: #fbebec;
+  --foreground: #200506;
+  --muted: #8a6467;
+  --border: rgba(32, 5, 6, 0.09);
+  color-scheme: light;
+}
+
+.theme-coworker.light .glass {
+  background: rgba(32, 5, 6, 0.04);
+  border: 1px solid var(--border);
+}
+
+.theme-coworker.light .glass-strong {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(32, 5, 6, 0.08);
+}
+
+.theme-coworker.light .skeleton-shimmer {
+  background: rgba(32, 5, 6, 0.05);
+}

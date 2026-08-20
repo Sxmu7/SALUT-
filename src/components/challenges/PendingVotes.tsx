@@ -23,7 +23,10 @@ export function PendingVotes({
   onVoted,
 }: {
   submissions: Submission[];
-  challengesById: Map<string, Challenge>;
+  // Pick statt vollem Challenge: wird auch vom Kollegen-Feed mit einer Map
+  // aus CoworkerChallenge (kein categoryId) wiederverwendet – hier werden
+  // ohnehin nur icon/title gebraucht.
+  challengesById: Map<string, Pick<Challenge, "icon" | "title">>;
   membersById: Map<string, Profile>;
   currentUserId?: string;
   onVoted: () => void;
@@ -68,7 +71,7 @@ function VoteCard({
   onVoted,
 }: {
   submission: Submission;
-  challenge?: Challenge;
+  challenge?: Pick<Challenge, "icon" | "title">;
   member?: Profile;
   currentUserId?: string;
   onVoted: () => void;

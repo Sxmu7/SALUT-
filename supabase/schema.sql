@@ -101,6 +101,61 @@ drop policy if exists "Nutzer können Gruppen beitreten" on group_members;
 create policy "Nutzer können Gruppen beitreten"
   on group_members for insert with check (auth.uid() = user_id);
 
+-- ---------- Kollegen-Gruppen (Co-Worker-Modus) ----------
+-- Bewusst KOMPLETT getrennt von groups/group_members: Arbeitskolleg:innen
+-- sollen nicht automatisch in denselben Gruppen wie Trinkspiel-Freunde
+-- landen. Eigener Invite-Code, eigene Mitgliederliste, sonst 1:1 dasselbe
+-- Muster wie oben bei groups/group_members/is_group_member().
+create table if not exists coworker_groups (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  emoji text not null default '🏢',
+  invite_code text not null unique,
+  owner_id uuid not null references profiles (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists coworker_group_members (
+  group_id uuid not null references coworker_groups (id) on delete cascade,
+  user_id uuid not null references profiles (id) on delete cascade,
+  joined_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+
+alter table coworker_groups enable row level security;
+alter table coworker_group_members enable row level security;
+
+create or replace function is_coworker_group_member(p_group_id uuid, p_user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from coworker_group_members where group_id = p_group_id and user_id = p_user_id
+  );
+$$;
+
+revoke all on function is_coworker_group_member(uuid, uuid) from public;
+grant execute on function is_coworker_group_member(uuid, uuid) to authenticated, anon;
+
+drop policy if exists "Mitglieder sehen ihre Kollegen-Gruppen" on coworker_groups;
+create policy "Mitglieder sehen ihre Kollegen-Gruppen"
+  on coworker_groups for select using (is_coworker_group_member(id, auth.uid()));
+
+drop policy if exists "Nutzer können Kollegen-Gruppen erstellen" on coworker_groups;
+create policy "Nutzer können Kollegen-Gruppen erstellen"
+  on coworker_groups for insert with check (auth.uid() = owner_id);
+
+drop policy if exists "Mitgliedschaften sind für Kollegen-Gruppenmitglieder sichtbar" on coworker_group_members;
+create policy "Mitgliedschaften sind für Kollegen-Gruppenmitglieder sichtbar"
+  on coworker_group_members for select using (is_coworker_group_member(group_id, auth.uid()));
+
+drop policy if exists "Nutzer können Kollegen-Gruppen beitreten" on coworker_group_members;
+create policy "Nutzer können Kollegen-Gruppen beitreten"
+  on coworker_group_members for insert with check (auth.uid() = user_id);
+
 -- ---------- Categories & Challenges ----------
 create table if not exists categories (
   id text primary key,
@@ -138,10 +193,43 @@ drop policy if exists "Angemeldete Nutzer können eigene Challenges anlegen" on 
 create policy "Angemeldete Nutzer können eigene Challenges anlegen"
   on challenges for insert with check (auth.role() = 'authenticated');
 
+-- ---------- Kollegen-Challenges (Co-Worker-Modus, komplett eigener Katalog) ----------
+-- Bewusst eine eigene Tabelle statt Wiederverwendung von "challenges": die
+-- Kollegen-Challenges dürfen NIE Alkohol/Trinkspiel-Inhalte enthalten und
+-- sollen unabhängig vom Trinkspiel-Katalog gepflegt werden können. Gleiche
+-- Spaltenstruktur wie "challenges" (ohne category_id/is_birthday_exclusive,
+-- die dort nichts bedeuten), damit event_challenges/submissions dieselbe
+-- Textspalte challenge_id für beide Kataloge nutzen können (siehe die
+-- gelockerten FKs weiter unten).
+create table if not exists coworker_challenges (
+  id text primary key,
+  title text not null,
+  description text not null,
+  points int not null check (points > 0),
+  difficulty text not null check (difficulty in ('easy','medium','hard','legendary')),
+  proof_type text not null check (proof_type in ('photo','video','none')),
+  icon text not null default '💼',
+  animation text not null default 'pop',
+  is_custom boolean not null default false,
+  created_by uuid references profiles (id),
+  source text not null default 'fixed' check (source in ('fixed','manual','ai')),
+  created_at timestamptz not null default now()
+);
+
+alter table coworker_challenges enable row level security;
+
+drop policy if exists "Kollegen-Challenges sind öffentlich lesbar" on coworker_challenges;
+create policy "Kollegen-Challenges sind öffentlich lesbar"
+  on coworker_challenges for select using (true);
+
+drop policy if exists "Angemeldete Nutzer können eigene Kollegen-Challenges anlegen" on coworker_challenges;
+create policy "Angemeldete Nutzer können eigene Kollegen-Challenges anlegen"
+  on coworker_challenges for insert with check (auth.role() = 'authenticated');
+
 -- ---------- Events ----------
 create table if not exists events (
   id uuid primary key default gen_random_uuid(),
-  group_id uuid not null references groups (id) on delete cascade,
+  group_id uuid references groups (id) on delete cascade,
   title text not null,
   type text not null check (type in ('birthday','custom','party')),
   emoji text not null default '🎉',
@@ -172,42 +260,80 @@ alter table events add column if not exists target_challenge_count int;
 alter table events add column if not exists ended_at timestamptz;
 alter table event_challenges add column if not exists assigned_user_id uuid references profiles (id);
 
+-- ---------- Co-Worker-Modus: events für Kollegen-Gruppen ----------
+-- Ein Event gehört IMMER entweder zu einer Trinkspiel-Gruppe (group_id)
+-- ODER zu einer Kollegen-Gruppe (coworker_group_id), nie beides/keines –
+-- daher group_id jetzt nullable + die Check-Constraint unten.
+-- coworker_next_push_at/coworker_push_cycle steuern den automatischen
+-- 5-Minuten-Push im Arbeitszeitfenster (siehe next_coworker_push_time()
+-- und claim_due_coworker_pushes() weiter unten). event_challenges.
+-- challenge_id verliert dafür seine feste FK auf challenges(id): eine
+-- Kollegen-Challenge kommt aus der komplett separaten Tabelle
+-- coworker_challenges (siehe unten), submissions.challenge_id ebenso.
+alter table events add column if not exists coworker_group_id uuid references coworker_groups (id) on delete cascade;
+alter table events add column if not exists coworker_next_push_at timestamptz;
+alter table events add column if not exists coworker_push_cycle int not null default 1;
+alter table events alter column group_id drop not null;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'events_group_xor_coworker_group'
+  ) then
+    alter table events add constraint events_group_xor_coworker_group check (
+      (group_id is not null and coworker_group_id is null)
+      or (group_id is null and coworker_group_id is not null)
+    );
+  end if;
+end $$;
+
+alter table events drop constraint if exists events_type_check;
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'events_type_check2'
+  ) then
+    alter table events add constraint events_type_check2
+      check (type in ('birthday','custom','party','coworker'));
+  end if;
+end $$;
+
+alter table event_challenges drop constraint if exists event_challenges_challenge_id_fkey;
+
 alter table events enable row level security;
 alter table event_challenges enable row level security;
 
-drop policy if exists "Mitglieder sehen Events ihrer Gruppe" on events;
-create policy "Mitglieder sehen Events ihrer Gruppe"
-  on events for select using (
-    exists (select 1 from group_members gm where gm.group_id = events.group_id and gm.user_id = auth.uid())
+-- ---------- Helfer: Zugriff auf ein Event (Trinkspiel- ODER Kollegen-Pfad) ----------
+-- Bündelt die "bin ich Mitglied der zugehörigen Gruppe"-Prüfung an einer
+-- Stelle, statt sie in jeder einzelnen Policy (events/event_challenges/
+-- submissions/votes) separat zu verdoppeln. Security Definer + stable,
+-- analog zu is_group_member() oben – sicher auch innerhalb der eigenen
+-- events-Policy nutzbar (kein rekursives RLS, siehe Kommentar dort).
+create or replace function can_access_event(p_event_id uuid, p_user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from events e
+    where e.id = p_event_id
+      and (
+        (e.group_id is not null and is_group_member(e.group_id, p_user_id))
+        or (e.coworker_group_id is not null and is_coworker_group_member(e.coworker_group_id, p_user_id))
+      )
   );
+$$;
 
-drop policy if exists "Mitglieder können Events erstellen" on events;
-create policy "Mitglieder können Events erstellen"
-  on events for insert with check (
-    exists (select 1 from group_members gm where gm.group_id = events.group_id and gm.user_id = auth.uid())
-  );
-
-drop policy if exists "Mitglieder sehen Event-Challenges" on event_challenges;
-create policy "Mitglieder sehen Event-Challenges"
-  on event_challenges for select using (
-    exists (
-      select 1 from events e
-      join group_members gm on gm.group_id = e.group_id
-      where e.id = event_challenges.event_id and gm.user_id = auth.uid()
-    )
-  );
-
-drop policy if exists "Mitglieder können Event-Challenges hinzufügen" on event_challenges;
-create policy "Mitglieder können Event-Challenges hinzufügen"
-  on event_challenges for insert with check (
-    exists (
-      select 1 from events e
-      join group_members gm on gm.group_id = e.group_id
-      where e.id = event_challenges.event_id and gm.user_id = auth.uid()
-    )
-  );
+revoke all on function can_access_event(uuid, uuid) from public;
+grant execute on function can_access_event(uuid, uuid) to authenticated, anon;
 
 -- ---------- Submissions (Beweise) & Votes ----------
+-- Tabellen MÜSSEN vor can_access_submission() stehen: anders als plpgsql
+-- wird der Rumpf einer "language sql"-Funktion schon bei CREATE FUNCTION
+-- gegen den Katalog geprüft (referenzierte Tabellen müssen zu diesem
+-- Zeitpunkt bereits existieren), nicht erst beim ersten Aufruf.
 create table if not exists submissions (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references events (id) on delete cascade,
@@ -229,18 +355,52 @@ create table if not exists votes (
   primary key (submission_id, voter_id)
 );
 
+alter table submissions drop constraint if exists submissions_challenge_id_fkey;
+
 alter table submissions enable row level security;
 alter table votes enable row level security;
 
+create or replace function can_access_submission(p_submission_id uuid, p_user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from submissions s
+    where s.id = p_submission_id and can_access_event(s.event_id, p_user_id)
+  );
+$$;
+
+revoke all on function can_access_submission(uuid, uuid) from public;
+grant execute on function can_access_submission(uuid, uuid) to authenticated, anon;
+
+-- ---------- Policies: Events, Event-Challenges, Submissions, Votes ----------
+-- Gebündelt an einer Stelle, nachdem alle vier Tabellen + beide Helfer-
+-- funktionen oben existieren.
+drop policy if exists "Mitglieder sehen Events ihrer Gruppe" on events;
+create policy "Mitglieder sehen Events ihrer Gruppe"
+  on events for select using (can_access_event(id, auth.uid()));
+
+drop policy if exists "Mitglieder können Events erstellen" on events;
+create policy "Mitglieder können Events erstellen"
+  on events for insert with check (
+    (group_id is not null and is_group_member(group_id, auth.uid()))
+    or (coworker_group_id is not null and is_coworker_group_member(coworker_group_id, auth.uid()))
+  );
+
+drop policy if exists "Mitglieder sehen Event-Challenges" on event_challenges;
+create policy "Mitglieder sehen Event-Challenges"
+  on event_challenges for select using (can_access_event(event_id, auth.uid()));
+
+drop policy if exists "Mitglieder können Event-Challenges hinzufügen" on event_challenges;
+create policy "Mitglieder können Event-Challenges hinzufügen"
+  on event_challenges for insert with check (can_access_event(event_id, auth.uid()));
+
 drop policy if exists "Mitglieder sehen Submissions ihrer Gruppe" on submissions;
 create policy "Mitglieder sehen Submissions ihrer Gruppe"
-  on submissions for select using (
-    exists (
-      select 1 from events e
-      join group_members gm on gm.group_id = e.group_id
-      where e.id = submissions.event_id and gm.user_id = auth.uid()
-    )
-  );
+  on submissions for select using (can_access_event(event_id, auth.uid()));
 
 drop policy if exists "Nutzer können eigene Submissions anlegen" on submissions;
 create policy "Nutzer können eigene Submissions anlegen"
@@ -248,14 +408,7 @@ create policy "Nutzer können eigene Submissions anlegen"
 
 drop policy if exists "Mitglieder sehen Votes ihrer Gruppe" on votes;
 create policy "Mitglieder sehen Votes ihrer Gruppe"
-  on votes for select using (
-    exists (
-      select 1 from submissions s
-      join events e on e.id = s.event_id
-      join group_members gm on gm.group_id = e.group_id
-      where s.id = votes.submission_id and gm.user_id = auth.uid()
-    )
-  );
+  on votes for select using (can_access_submission(submission_id, auth.uid()));
 
 drop policy if exists "Mitglieder können abstimmen" on votes;
 create policy "Mitglieder können abstimmen"
@@ -471,6 +624,159 @@ $$;
 revoke all on function delete_group(uuid) from public;
 grant execute on function delete_group(uuid) to authenticated;
 
+-- ---------- Kollegen-Gruppen: erstellen/beitreten/verlassen/entfernen/löschen ----------
+-- 1:1 dieselben Henne-Ei-/Berechtigungsmuster wie oben bei den Trinkspiel-
+-- Gruppen (join_group_by_code/create_group/leave_group/kick_group_member/
+-- delete_group), nur auf coworker_groups/coworker_group_members statt
+-- groups/group_members – bewusst eigene Funktionen statt Parametrisierung,
+-- damit niemals aus Versehen ein Kollege in eine Trinkspiel-Gruppe (oder
+-- umgekehrt) landen kann.
+create or replace function join_coworker_group_by_code(p_invite_code text)
+returns coworker_groups
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_group coworker_groups;
+begin
+  select * into v_group from coworker_groups where invite_code = upper(trim(p_invite_code));
+  if not found then
+    raise exception 'invite_code_not_found';
+  end if;
+
+  insert into coworker_group_members (group_id, user_id)
+  values (v_group.id, auth.uid())
+  on conflict (group_id, user_id) do nothing;
+
+  return v_group;
+end;
+$$;
+
+revoke all on function join_coworker_group_by_code(text) from public;
+grant execute on function join_coworker_group_by_code(text) to authenticated;
+
+create or replace function create_coworker_group(p_name text, p_emoji text)
+returns coworker_groups
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_group coworker_groups;
+  v_invite_code text;
+  v_attempts int := 0;
+begin
+  loop
+    v_invite_code := upper(substr(md5(random()::text || clock_timestamp()::text), 1, 6));
+    begin
+      insert into coworker_groups (name, emoji, invite_code, owner_id)
+      values (p_name, p_emoji, v_invite_code, auth.uid())
+      returning * into v_group;
+      exit;
+    exception when unique_violation then
+      v_attempts := v_attempts + 1;
+      if v_attempts > 5 then
+        raise exception 'invite_code_generation_failed';
+      end if;
+    end;
+  end loop;
+
+  insert into coworker_group_members (group_id, user_id)
+  values (v_group.id, auth.uid())
+  on conflict (group_id, user_id) do nothing;
+
+  return v_group;
+end;
+$$;
+
+revoke all on function create_coworker_group(text, text) from public;
+grant execute on function create_coworker_group(text, text) to authenticated;
+
+create or replace function leave_coworker_group(p_group_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_owner_id uuid;
+  v_member_count int;
+begin
+  select owner_id into v_owner_id from coworker_groups where id = p_group_id;
+  if v_owner_id is null then
+    raise exception 'group_not_found';
+  end if;
+
+  if not exists (
+    select 1 from coworker_group_members where group_id = p_group_id and user_id = auth.uid()
+  ) then
+    raise exception 'not_a_member';
+  end if;
+
+  if auth.uid() = v_owner_id then
+    select count(*) into v_member_count from coworker_group_members where group_id = p_group_id;
+    if v_member_count > 1 then
+      raise exception 'owner_must_delete_or_remove_members_first';
+    end if;
+    delete from coworker_groups where id = p_group_id;
+    return;
+  end if;
+
+  delete from coworker_group_members where group_id = p_group_id and user_id = auth.uid();
+end;
+$$;
+
+revoke all on function leave_coworker_group(uuid) from public;
+grant execute on function leave_coworker_group(uuid) to authenticated;
+
+create or replace function kick_coworker_group_member(p_group_id uuid, p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_owner_id uuid;
+begin
+  select owner_id into v_owner_id from coworker_groups where id = p_group_id;
+  if v_owner_id is null then
+    raise exception 'group_not_found';
+  end if;
+  if auth.uid() <> v_owner_id then
+    raise exception 'only_owner_can_remove_members';
+  end if;
+  if p_user_id = v_owner_id then
+    raise exception 'cannot_remove_owner';
+  end if;
+
+  delete from coworker_group_members where group_id = p_group_id and user_id = p_user_id;
+end;
+$$;
+
+revoke all on function kick_coworker_group_member(uuid, uuid) from public;
+grant execute on function kick_coworker_group_member(uuid, uuid) to authenticated;
+
+create or replace function delete_coworker_group(p_group_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from coworker_groups where id = p_group_id and owner_id = auth.uid()
+  ) then
+    raise exception 'only_owner_can_delete_group';
+  end if;
+
+  delete from coworker_groups where id = p_group_id;
+end;
+$$;
+
+revoke all on function delete_coworker_group(uuid) from public;
+grant execute on function delete_coworker_group(uuid) to authenticated;
+
 -- ---------- Reihum-Modus & Abend-Ziel (Security Definer) ----------
 -- Events haben bewusst keine generische UPDATE-Policy (wie der Rest dieses
 -- Schemas nur Security-Definer-RPCs für Schreibzugriffe) – daher hier drei
@@ -555,7 +861,12 @@ begin
   if not found then
     raise exception 'event_not_found';
   end if;
-  if not is_group_member(v_event.group_id, auth.uid()) then
+  -- Funktioniert für beide Modi: Trinkspiel-Events prüfen group_id, Kollegen-
+  -- Events (coworker_group_id gesetzt) den getrennten Mitgliederkreis.
+  if not (
+    (v_event.group_id is not null and is_group_member(v_event.group_id, auth.uid()))
+    or (v_event.coworker_group_id is not null and is_coworker_group_member(v_event.coworker_group_id, auth.uid()))
+  ) then
     raise exception 'not_a_group_member';
   end if;
 
@@ -640,7 +951,7 @@ set search_path = public
 as $$
 declare
   v_submission submissions;
-  v_group_id uuid;
+  v_event events;
   v_total_voters int;
   v_quorum int;
   v_approvals int;
@@ -668,10 +979,20 @@ begin
   values (p_submission_id, auth.uid(), p_approve)
   on conflict (submission_id, voter_id) do update set approve = excluded.approve;
 
-  select e.group_id into v_group_id from events e where e.id = v_submission.event_id;
-  select count(*) into v_total_voters
-    from group_members
-    where group_id = v_group_id and user_id <> v_submission.user_id;
+  select * into v_event from events e where e.id = v_submission.event_id;
+
+  -- Kollegen-Modus (coworker_group_id gesetzt) zählt Stimmberechtigte aus
+  -- coworker_group_members statt group_members – komplett eigener,
+  -- getrennter Mitgliederkreis (siehe coworker_groups oben).
+  if v_event.coworker_group_id is not null then
+    select count(*) into v_total_voters
+      from coworker_group_members
+      where group_id = v_event.coworker_group_id and user_id <> v_submission.user_id;
+  else
+    select count(*) into v_total_voters
+      from group_members
+      where group_id = v_event.group_id and user_id <> v_submission.user_id;
+  end if;
   v_quorum := greatest(1, ceil(v_total_voters / 2.0));
 
   -- user_id <> v_submission.user_id ist eigentlich durch die Prüfung oben
@@ -686,7 +1007,13 @@ begin
     from votes where submission_id = p_submission_id and voter_id <> v_submission.user_id;
 
   if v_approvals >= v_quorum then
-    select points into v_points from challenges where id = v_submission.challenge_id;
+    -- Punkte kommen je nach Modus aus dem Trinkspiel- oder dem getrennten
+    -- Kollegen-Challenge-Katalog (siehe coworker_challenges oben).
+    if v_event.coworker_group_id is not null then
+      select points into v_points from coworker_challenges where id = v_submission.challenge_id;
+    else
+      select points into v_points from challenges where id = v_submission.challenge_id;
+    end if;
     update submissions set status = 'approved', points_awarded = coalesce(v_points, 0)
       where id = p_submission_id returning * into v_submission;
     -- Reihum-Weiterschaltung + Abend-Ziel-Check (siehe oben) – bewusst
@@ -756,6 +1083,38 @@ insert into challenges (id, category_id, title, description, points, difficulty,
   ('c-91', 'klassiker', 'Lebensjahre-Shot', 'Ein Shot für jedes Lebensjahr (max. 10) – gemeinsam mit der Gruppe im Staffel-Modus.', 90, 'legendary', 'video', '🎂', 'shake', true, false, 'fixed'),
   ('c-92', 'performance', 'Geburtstags-Rede', 'Halte eine spontane, emotionale 90-Sekunden-Dankesrede an die Gruppe.', 60, 'hard', 'video', '🎉', 'glow', true, false, 'fixed'),
   ('c-93', 'team', 'Ehrengarde', 'Die Gruppe trägt das Geburtstagskind einmal durch den Raum (sicher!).', 70, 'hard', 'video', '🛡️', 'bounce', true, false, 'fixed')
+on conflict (id) do nothing;
+
+-- ---------- Seed: Kollegen-Challenges (Co-Worker-Modus) ----------
+-- Bewusst KEIN Alkohol/Trinkspiel-Bezug – lustige, harmlose Arbeitsalltag-
+-- Challenges, wie vom Nutzer vorgegeben (Kollegen finden, Kundentermin,
+-- Motivation für unlustige Kollegen, etc.). Immer freundlich/respektvoll
+-- gegenüber Kolleg:innen und Kund:innen gehalten, nichts Bloßstellendes.
+insert into coworker_challenges (id, title, description, points, difficulty, proof_type, icon, animation, source) values
+  ('cw-01', 'Kaffee-Engel', 'Hol einer Kollegin/einem Kollegen beim nächsten Kaffeeholen spontan eine Tasse mit.', 15, 'easy', 'photo', '☕', 'pop', 'fixed'),
+  ('cw-02', 'Echtes Kompliment', 'Mach jemandem im Büro ein aufrichtiges Kompliment zu seiner/ihrer Arbeit.', 15, 'easy', 'none', '💬', 'glow', 'fixed'),
+  ('cw-03', 'Mitarbeiter-Scout', 'Finde einen Kollegen/eine Kollegin, den/die du noch nie gesprochen hast, und stell dich kurz vor.', 20, 'easy', 'photo', '🕵️', 'slide', 'fixed'),
+  ('cw-04', 'Kundentermin-Bonus', 'Stelle bei deinem nächsten Kundentermin eine zusätzliche freundliche Frage zum Wohlbefinden.', 25, 'medium', 'none', '🤝', 'pulse', 'fixed'),
+  ('cw-05', 'Motivations-Profi', 'Finde eine Kollegin/einen Kollegen mit wenig Lust auf einen Termin heute und motiviere sie/ihn mit einem guten Spruch.', 30, 'medium', 'none', '🔥', 'shake', 'fixed'),
+  ('cw-06', 'Aufräum-Blitz', 'Räume deinen Schreibtisch auf und mach ein Vorher-Nachher-Foto.', 20, 'easy', 'photo', '🧹', 'pop', 'fixed'),
+  ('cw-07', 'Namens-Gedächtnis', 'Lerne den Namen einer Person aus einer anderen Abteilung/Filiale und grüße sie damit.', 20, 'easy', 'none', '🏷️', 'slide', 'fixed'),
+  ('cw-08', 'Guten-Morgen-Runde', 'Sag heute 5 verschiedenen Personen laut und deutlich "Guten Morgen".', 20, 'easy', 'none', '👋', 'bounce', 'fixed'),
+  ('cw-09', 'Homeoffice-Gruß', 'Schreib jemandem im Homeoffice eine kurze, nette Nachricht.', 15, 'easy', 'none', '💻', 'pop', 'fixed'),
+  ('cw-10', 'Tür-Held', 'Halte innerhalb einer Stunde 3 Personen die Tür auf.', 20, 'easy', 'none', '🚪', 'pop', 'fixed'),
+  ('cw-11', 'Wochenend-Frage', 'Frag eine Kollegin/einen Kollegen, wie ihr/sein Wochenende war – und hör wirklich zu.', 15, 'easy', 'none', '🗓️', 'glow', 'fixed'),
+  ('cw-12', 'Dankes-Mail', 'Schreib einem Kunden nach einem guten Termin eine kurze, ehrliche Dankes-Mail.', 30, 'medium', 'none', '📧', 'slide', 'fixed'),
+  ('cw-13', 'Erfahrungsschatz', 'Finde das dienstälteste Teammitglied im Büro und frag nach einem Karriere-Tipp.', 30, 'medium', 'none', '🎓', 'glow', 'fixed'),
+  ('cw-14', 'Grüne Runde', 'Gieße die Büropflanzen, ohne dass es dir jemand vorher sagen musste.', 15, 'easy', 'photo', '🌱', 'pop', 'fixed'),
+  ('cw-15', 'Stille-Helfer', 'Räum die Kaffeemaschine oder Spülmaschine auf, ohne dass es jemand merkt.', 20, 'easy', 'photo', '🍽️', 'slide', 'fixed'),
+  ('cw-16', 'High-Five-Champion', 'Gib einer Kollegin/einem Kollegen ein High-Five für einen erledigten Task.', 10, 'easy', 'none', '🙌', 'bounce', 'fixed'),
+  ('cw-17', 'Aufmunterungs-Notiz', 'Schreib jemandem nach einem stressigen Telefonat eine kurze aufmunternde Notiz.', 20, 'easy', 'none', '📝', 'glow', 'fixed'),
+  ('cw-18', 'Blitz-Zusammenfassung', 'Fasse deinen letzten Kundentermin in unter 2 Minuten für ein Teammitglied zusammen.', 35, 'medium', 'none', '⏱️', 'pulse', 'fixed'),
+  ('cw-19', 'Chef-Tipp', 'Frag deine Führungskraft nach einem Tipp für den heutigen Arbeitstag.', 25, 'medium', 'none', '🧭', 'slide', 'fixed'),
+  ('cw-20', 'Lachen-Mission', 'Finde einen Kollegen ohne Motivation für seinen Job heute und bring ihn mit einem guten Spruch zum Lachen.', 35, 'medium', 'none', '😄', 'shake', 'fixed'),
+  ('cw-21', 'Lächel-Beweis', 'Mach nach einem besonders guten Kundengespräch ein Selfie mit deinem besten Lächeln.', 20, 'easy', 'photo', '😊', 'pop', 'fixed'),
+  ('cw-22', 'Team-Brücke', 'Verbinde zwei Kolleg:innen aus unterschiedlichen Teams miteinander (kurz vorstellen reicht).', 30, 'medium', 'none', '🌉', 'glow', 'fixed'),
+  ('cw-23', 'Kunden-Detektiv', 'Finde heraus, worauf sich dein nächster Kunde am meisten freut, und sprich es aktiv an.', 35, 'medium', 'none', '🔍', 'pulse', 'fixed'),
+  ('cw-24', 'Feedback-Mut', 'Bitte eine Kollegin/einen Kollegen um ehrliches Feedback zu einer aktuellen Aufgabe.', 40, 'hard', 'none', '💡', 'glow', 'fixed')
 on conflict (id) do nothing;
 
 -- ======================================================================
@@ -1038,6 +1397,289 @@ $$;
 
 revoke all on function pick_next_party_push_challenge(uuid) from public;
 grant execute on function pick_next_party_push_challenge(uuid) to service_role;
+
+-- ======================================================================
+-- Push-Benachrichtigungen für den Kollegen-Modus (Co-Worker-Modus)
+-- ======================================================================
+-- Anders als im Party-Modus (dort ein optionaler Zusatz-Toggle) IST der
+-- automatische 5-Minuten-Push hier der Kernmechanismus: alle 5 Minuten
+-- innerhalb der Arbeitszeit (Mo-Fr 09:00-12:30 & 14:00-17:00, Europe/
+-- Berlin) kommt eine neue Challenge rein, wer zuerst "annehmen" tippt
+-- (claim_coworker_challenge unten) muss sie machen. Deshalb steckt der
+-- Zeitplan direkt auf "events" (coworker_next_push_at/coworker_push_cycle,
+-- siehe oben) statt in einer eigenen Zustandstabelle wie party_push_state.
+-- Versand selbst passiert wieder NICHT hier, sondern in der Edge Function
+-- supabase/functions/coworker-push-tick (Deno) - Setup siehe DEPLOY.md.
+
+-- ---------- Verlauf: welche Kollegen-Challenge wurde in welchem Zyklus verschickt ----------
+create table if not exists coworker_push_sent (
+  id uuid primary key default gen_random_uuid(),
+  event_id uuid not null references events (id) on delete cascade,
+  challenge_id text not null references coworker_challenges (id),
+  cycle int not null,
+  sent_at timestamptz not null default now()
+);
+
+alter table coworker_push_sent enable row level security;
+
+drop policy if exists "Mitglieder sehen Kollegen-Push-Verlauf ihrer Events" on coworker_push_sent;
+create policy "Mitglieder sehen Kollegen-Push-Verlauf ihrer Events"
+  on coworker_push_sent for select using (can_access_event(event_id, auth.uid()));
+
+-- ---------- Nächster gültiger 5-Minuten-Zeitpunkt im Arbeitszeitfenster ----------
+-- Rechnet in Europe/Berlin-Ortszeit (DST-sicher dank "at time zone"), rundet
+-- auf das nächste volle 5-Minuten-Raster und springt über Mittagspause
+-- (12:30-14:00), Feierabend (ab 17:00) sowie Wochenenden direkt zum
+-- nächsten Werktag 09:00. Gegen 16 Randfall-Testfälle (Grenzen exakt auf
+-- 09:00/12:30/14:00/17:00, Freitag->Montag, Wochenende->Montag) lokal gegen
+-- echtes PostgreSQL verifiziert.
+create or replace function next_coworker_push_time(p_from timestamptz)
+returns timestamptz
+language plpgsql
+stable
+as $$
+declare
+  v_local timestamp;
+  v_day date;
+  v_dow int;
+  v_time time;
+  v_candidate timestamp;
+begin
+  v_local := p_from at time zone 'Europe/Berlin';
+  v_day := v_local::date;
+  v_dow := extract(isodow from v_local); -- 1=Mo .. 7=So
+  v_time := v_local::time;
+
+  -- Wochenende: direkt zum naechsten Montag 9:00.
+  if v_dow = 6 then
+    return ((v_day + 2) + time '09:00') at time zone 'Europe/Berlin';
+  elsif v_dow = 7 then
+    return ((v_day + 1) + time '09:00') at time zone 'Europe/Berlin';
+  end if;
+
+  if v_time < time '09:00' then
+    v_candidate := v_day + time '09:00';
+  elsif v_time < time '12:30' then
+    v_candidate := v_day + time '09:00'
+      + (ceil(extract(epoch from (v_time - time '09:00')) / 300.0) * 300) * interval '1 second';
+    if v_candidate::time >= time '12:30' then
+      v_candidate := v_day + time '14:00';
+    end if;
+  elsif v_time < time '14:00' then
+    v_candidate := v_day + time '14:00';
+  elsif v_time < time '17:00' then
+    v_candidate := v_day + time '14:00'
+      + (ceil(extract(epoch from (v_time - time '14:00')) / 300.0) * 300) * interval '1 second';
+    if v_candidate::time >= time '17:00' then
+      if v_dow = 5 then
+        v_candidate := (v_day + 3) + time '09:00';
+      else
+        v_candidate := (v_day + 1) + time '09:00';
+      end if;
+    end if;
+  else
+    if v_dow = 5 then
+      v_candidate := (v_day + 3) + time '09:00';
+    else
+      v_candidate := (v_day + 1) + time '09:00';
+    end if;
+  end if;
+
+  return v_candidate at time zone 'Europe/Berlin';
+end;
+$$;
+
+revoke all on function next_coworker_push_time(timestamptz) from public;
+grant execute on function next_coworker_push_time(timestamptz) to authenticated, service_role;
+
+-- ---------- Liegt ein Zeitpunkt gerade innerhalb der Arbeitszeit? ----------
+-- Zweite, unabhängige Absicherung für pick_next_coworker_push_challenge()
+-- unten: claim_due_coworker_pushes() plant beim allerersten Tick eines
+-- frisch gestarteten Kollegen-Events (next_push_at war noch null) sofort
+-- den nächsten gültigen Slot ein – liegt "jetzt" selbst aber außerhalb der
+-- Arbeitszeit (z.B. Event um 22 Uhr gestartet), soll in diesem einen Tick
+-- trotzdem KEINE Challenge verschickt werden, obwohl die Zeile als "fällig"
+-- zurückkam.
+create or replace function is_within_coworker_work_hours(p_ts timestamptz)
+returns boolean
+language plpgsql
+stable
+as $$
+declare
+  v_local timestamp;
+  v_dow int;
+  v_time time;
+begin
+  v_local := p_ts at time zone 'Europe/Berlin';
+  v_dow := extract(isodow from v_local);
+  v_time := v_local::time;
+  if v_dow > 5 then
+    return false;
+  end if;
+  return (v_time >= time '09:00' and v_time < time '12:30')
+      or (v_time >= time '14:00' and v_time < time '17:00');
+end;
+$$;
+
+revoke all on function is_within_coworker_work_hours(timestamptz) from public;
+grant execute on function is_within_coworker_work_hours(timestamptz) to authenticated, service_role;
+
+-- ---------- Fällige Kollegen-Pushs atomar "claimen" (nur service_role) ----------
+-- Gleiches Muster wie claim_due_party_pushes(): das UPDATE ... RETURNING
+-- claimt fällige Zeilen und plant sofort den nächsten Slot weiter, bevor
+-- irgendein Push verschickt wird – ein zweiter, überlappender Scheduler-
+-- Lauf sieht dieselbe Zeile danach nicht mehr als fällig.
+create or replace function claim_due_coworker_pushes()
+returns setof events
+language sql
+security definer
+set search_path = public
+as $$
+  update events e
+  set coworker_next_push_at = next_coworker_push_time(now())
+  where e.type = 'coworker'
+    and e.status = 'live'
+    and (e.coworker_next_push_at is null or e.coworker_next_push_at <= now())
+  returning e.*;
+$$;
+
+revoke all on function claim_due_coworker_pushes() from public;
+grant execute on function claim_due_coworker_pushes() to service_role;
+
+-- ---------- Nächste Kollegen-Challenge wählen (nur service_role) ----------
+-- Wichtig (Nutzer-Feedback): bevor eine neue Challenge verschickt wird,
+-- muss geprüft werden, ob eine bereits angenommene ("geclaimte") Challenge
+-- dieses Events noch auf ihre Abstimmung wartet – Spieler 1 lädt hoch, der
+-- Rest bestätigt ja/nein, ERST DANACH geht es weiter. Solange das offen
+-- ist, wird kein neuer Push verschickt (return null), der nächste Tick
+-- prüft automatisch erneut. Sonst identisch zu
+-- pick_next_party_push_challenge(): zufällige, noch nicht im aktuellen
+-- Zyklus verschickte Challenge wählen, in coworker_push_sent protokollieren
+-- und zusätzlich ganz normal in event_challenges eintragen (taucht so auch
+-- im Feed auf).
+create or replace function pick_next_coworker_push_challenge(p_event_id uuid)
+returns coworker_challenges
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_event events;
+  v_pending boolean;
+  v_total int;
+  v_used int;
+  v_challenge coworker_challenges;
+  v_next_sort int;
+  v_cycle int;
+begin
+  if not is_within_coworker_work_hours(now()) then
+    return null;
+  end if;
+
+  select * into v_event from events where id = p_event_id and type = 'coworker';
+  if not found or v_event.status <> 'live' then
+    return null;
+  end if;
+
+  -- Wartet noch eine angenommene Challenge auf ihre Abstimmung (kein
+  -- Submission mit finalem Status approved/rejected)? Dann nicht weiter.
+  select exists (
+    select 1 from event_challenges ec
+    where ec.event_id = p_event_id
+      and ec.assigned_user_id is not null
+      and not exists (
+        select 1 from submissions s
+        where s.event_id = ec.event_id
+          and s.challenge_id = ec.challenge_id
+          and s.user_id = ec.assigned_user_id
+          and s.status in ('approved', 'rejected')
+      )
+  ) into v_pending;
+
+  if v_pending then
+    return null;
+  end if;
+
+  select count(*) into v_total from coworker_challenges;
+  if v_total = 0 then
+    return null;
+  end if;
+
+  v_cycle := v_event.coworker_push_cycle;
+  select count(*) into v_used from coworker_push_sent where event_id = p_event_id and cycle = v_cycle;
+  if v_used >= v_total then
+    v_cycle := v_cycle + 1;
+    update events set coworker_push_cycle = v_cycle where id = p_event_id;
+  end if;
+
+  select c.* into v_challenge
+    from coworker_challenges c
+    where c.id not in (
+      select challenge_id from coworker_push_sent where event_id = p_event_id and cycle = v_cycle
+    )
+    order by random()
+    limit 1;
+
+  if v_challenge.id is null then
+    return null;
+  end if;
+
+  insert into coworker_push_sent (event_id, challenge_id, cycle) values (p_event_id, v_challenge.id, v_cycle);
+
+  select coalesce(max(sort_order), 0) + 1 into v_next_sort from event_challenges where event_id = p_event_id;
+
+  insert into event_challenges (event_id, challenge_id, sort_order)
+  values (p_event_id, v_challenge.id, v_next_sort)
+  on conflict (event_id, challenge_id) do nothing;
+
+  return v_challenge;
+end;
+$$;
+
+revoke all on function pick_next_coworker_push_challenge(uuid) from public;
+grant execute on function pick_next_coworker_push_challenge(uuid) to service_role;
+
+-- ---------- Kollegen-Challenge annehmen ("claimen", Security Definer) ----------
+-- Wer zuerst tippt, kriegt sie: atomares UPDATE ... WHERE assigned_user_id
+-- IS NULL sorgt dafür, dass bei zwei fast gleichzeitigen Tippern nur genau
+-- eine Person gewinnt (Postgres serialisiert konkurrierende UPDATEs auf
+-- dieselbe Zeile). event_challenges.assigned_user_id ist dieselbe Spalte
+-- wie beim Reihum-Modus, hier aber als "wer hat angenommen" statt "wer ist
+-- laut Reihenfolge dran" genutzt – beide Modi laufen nie auf demselben
+-- Event zusammen (events.coworker_group_id vs. group_id, siehe oben).
+create or replace function claim_coworker_challenge(p_event_id uuid, p_challenge_id text)
+returns event_challenges
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_event events;
+  v_row event_challenges;
+begin
+  select * into v_event from events where id = p_event_id;
+  if not found or v_event.coworker_group_id is null then
+    raise exception 'event_not_found';
+  end if;
+  if not is_coworker_group_member(v_event.coworker_group_id, auth.uid()) then
+    raise exception 'not_a_group_member';
+  end if;
+
+  update event_challenges
+    set assigned_user_id = auth.uid()
+    where event_id = p_event_id and challenge_id = p_challenge_id and assigned_user_id is null
+    returning * into v_row;
+
+  if v_row.event_id is null then
+    raise exception 'already_claimed_or_not_found';
+  end if;
+
+  return v_row;
+end;
+$$;
+
+revoke all on function claim_coworker_challenge(uuid, text) from public;
+grant execute on function claim_coworker_challenge(uuid, text) to authenticated;
 
 -- ==================== Party-Bingo (Party-Modus) ====================
 -- Eigenständiges Feature neben den Push-Challenges. Hängt wie diese am
@@ -1640,7 +2282,7 @@ begin
     return;
   end if;
 
-  foreach v_table in array array['group_members', 'groups', 'submissions', 'votes', 'party_bingo', 'party_bingo_events']
+  foreach v_table in array array['group_members', 'groups', 'submissions', 'votes', 'party_bingo', 'party_bingo_events', 'coworker_group_members', 'coworker_groups', 'event_challenges']
   loop
     if not exists (
       select 1 from pg_publication_tables
@@ -1678,4 +2320,26 @@ end $$;
 -- );
 --
 -- Zum Deaktivieren: select cron.unschedule('party-push-tick');
+
+-- Gleiches Prinzip für den Kollegen-Modus, EIGENER Cron-Eintrag mit eigenem
+-- Namen (beide Jobs laufen unabhängig nebeneinander, jede Minute prüfen,
+-- welche Kollegen-Events gerade wirklich fällig sind entscheidet die Edge
+-- Function selbst über claim_due_coworker_pushes()):
+--
+-- select cron.schedule(
+--   'coworker-push-tick',
+--   '* * * * *', -- jede Minute; next_coworker_push_time() filtert auf Arbeitszeit
+--   $cron$
+--   select net.http_post(
+--     url := 'https://<project-ref>.supabase.co/functions/v1/coworker-push-tick',
+--     headers := jsonb_build_object(
+--       'Authorization', 'Bearer <service-role-key>',
+--       'Content-Type', 'application/json'
+--     ),
+--     body := '{}'::jsonb
+--   );
+--   $cron$
+-- );
+--
+-- Zum Deaktivieren: select cron.unschedule('coworker-push-tick');
 

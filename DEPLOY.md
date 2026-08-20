@@ -68,29 +68,42 @@ darauf eine echte Party läuft (Details dazu ebenfalls in `SETUP.md`).
 ## 5. (Optional) Push-Benachrichtigungen einrichten
 
 Braucht Supabase (Schritt 4) und die [Supabase CLI](https://supabase.com/docs/guides/cli).
-Es gibt drei unabhängige Push-Funktionen, die sich dieselben VAPID-Secrets
+Es gibt vier unabhängige Push-Funktionen, die sich dieselben VAPID-Secrets
 teilen:
 
 - **🗳️ Abstimmungs-Benachrichtigungen** (`notify-vote-request`): sobald
   jemand eine Challenge samt Beweis einreicht, bekommen alle anderen
-  Gruppenmitglieder mit aktiviertem Schalter sofort eine Push-
+  Gruppen-/Team-Mitglieder mit aktiviertem Schalter sofort eine Push-
   Benachrichtigung ("Mia hat eingereicht!") und können direkt zum
-  Abstimmen springen – auch bei geschlossener PWA. Wird DIREKT vom Client
+  Abstimmen springen – auch bei geschlossener PWA. Funktioniert für BEIDE
+  Modi (Trinkspiel und Kollegen-Modus, erkennt automatisch anhand des
+  Events, welcher Katalog/Mitgliederkreis gilt). Wird DIREKT vom Client
   ausgelöst, braucht deshalb **kein** `pg_cron`/`pg_net`.
 - **🎉 Challenge gemeistert** (`notify-challenge-completed`, QuizDuell-
   Style): sobald irgendjemandes Challenge genehmigt wird (per Abstimmung
   oder sofort bei Challenges ohne Beweis), bekommen alle anderen
-  Gruppenmitglieder eine Push ("Mia hat's geschafft!"). Im Reihum-Modus
-  bekommt die Person, die jetzt dran ist, zusätzlich eine eigene "Du bist
-  dran!"-Nachricht. Ebenfalls DIREKT vom Client ausgelöst, **kein**
-  `pg_cron`/`pg_net` nötig.
-- **🔔 Automatische Challenges** (`party-push-tick`): schickt im Party-
-  Modus automatisch neue Challenges im gewählten Takt, komplett
-  serverseitig per Scheduler. Braucht zusätzlich `pg_cron`/`pg_net`
-  (Schritt 2 + 5 unten).
+  Mitglieder eine Push ("Mia hat's geschafft!"). Im Reihum-Modus bekommt
+  die Person, die jetzt dran ist, zusätzlich eine eigene "Du bist
+  dran!"-Nachricht. Funktioniert ebenfalls für beide Modi. DIREKT vom
+  Client ausgelöst, **kein** `pg_cron`/`pg_net` nötig.
+- **🔔 Automatische Challenges im Party-Modus** (`party-push-tick`):
+  schickt im Party-Modus automatisch neue Challenges im gewählten Takt,
+  komplett serverseitig per Scheduler. Braucht zusätzlich `pg_cron`/
+  `pg_net` (Schritt 2 + 5 unten).
+- **💼 Automatische Challenges im Kollegen-Modus** (`coworker-push-tick`):
+  das Herzstück des Kollegen-Modus (nicht optional wie beim Party-Modus,
+  sondern der Kernmechanismus) – schickt Mo-Fr 09:00-12:30 & 14:00-17:00
+  (Europe/Berlin) automatisch alle 5 Minuten eine neue, alkoholfreie
+  Arbeitsalltag-Challenge, wer zuerst annimmt muss sie machen. Wartet dabei
+  automatisch, solange eine bereits angenommene Challenge noch auf ihre
+  Abstimmung wartet (kein Zuspammen). Ebenfalls `pg_cron`/`pg_net` nötig,
+  EIGENER Cron-Eintrag neben `party-push-tick` (Schritt 2 + 5 unten). Ohne
+  diesen Schritt bleibt der Kollegen-Modus nutzbar (Gruppen erstellen,
+  beitreten), aber es kommen nie automatisch Challenges rein.
 
 Ohne diese Schritte funktioniert die App ganz normal weiter, nur die
-Push-Schalter bleiben ohne Wirkung.
+Push-Schalter bleiben ohne Wirkung (der Kollegen-Modus bleibt ohne
+`coworker-push-tick` komplett ohne automatische Challenges).
 
 1. **VAPID-Schlüsselpaar erzeugen** (einmalig, lokal, keine Netzwerkverbindung
    nötig):
@@ -106,16 +119,19 @@ Push-Schalter bleiben ohne Wirkung.
    Für die Abstimmungs-Benachrichtigungen kann dieser Schritt übersprungen
    werden.
 
-3. **Alle drei Edge Functions deployen** (aus dem entpackten Projektordner):
+3. **Alle vier Edge Functions deployen** (aus dem entpackten Projektordner):
    ```bash
    supabase login
    supabase link --project-ref <dein-project-ref>
    supabase functions deploy notify-vote-request
    supabase functions deploy notify-challenge-completed
    supabase functions deploy party-push-tick
+   supabase functions deploy coworker-push-tick
    ```
    (Nur einzelne gewünscht? Einfach nur die passenden Zeilen ausführen –
-   alle drei sind unabhängig voneinander.)
+   alle vier sind unabhängig voneinander. Nur Kollegen-Modus? Dann reichen
+   `notify-vote-request`, `notify-challenge-completed` und
+   `coworker-push-tick` – `party-push-tick` kann entfallen.)
 
 4. **Secrets für die Edge Functions setzen** (gelten für beide Funktionen,
    der Private Key darf NIEMALS ins Frontend/`.env.local`, nur hierhin):
@@ -126,10 +142,10 @@ Push-Schalter bleiben ohne Wirkung.
      VAPID_SUBJECT=mailto:deine@email.de
    ```
 
-5. **Nur für "Automatische Challenges": Cron-Zeitplan anlegen** – im
+5. **Nur für "Automatische Challenges": Cron-Zeitplan(e) anlegen** – im
    SQL-Editor deines Supabase-Projekts (Werte aus `<project-ref>` und
-   deinem `service_role`-Key einsetzen, siehe auch der auskommentierte
-   Block am Ende von `supabase/schema.sql`):
+   deinem `service_role`-Key einsetzen, siehe auch die auskommentierten
+   Blöcke am Ende von `supabase/schema.sql`). Party-Modus:
    ```sql
    select cron.schedule(
      'party-push-tick',
@@ -137,6 +153,24 @@ Push-Schalter bleiben ohne Wirkung.
      $$
      select net.http_post(
        url := 'https://<project-ref>.supabase.co/functions/v1/party-push-tick',
+       headers := jsonb_build_object(
+         'Authorization', 'Bearer <service-role-key>',
+         'Content-Type', 'application/json'
+       ),
+       body := '{}'::jsonb
+     );
+     $$
+   );
+   ```
+   Kollegen-Modus (EIGENER, zusätzlicher Cron-Eintrag – beide können
+   parallel laufen):
+   ```sql
+   select cron.schedule(
+     'coworker-push-tick',
+     '* * * * *',
+     $$
+     select net.http_post(
+       url := 'https://<project-ref>.supabase.co/functions/v1/coworker-push-tick',
        headers := jsonb_build_object(
          'Authorization', 'Bearer <service-role-key>',
          'Content-Type', 'application/json'
@@ -166,12 +200,25 @@ Push-Schalter bleiben ohne Wirkung.
    - Reihum-Modus: im Event-Bildschirm "🔄 Reihum-Modus" aktivieren, auf
      einem zweiten Gerät/Profil sollte bei genehmigter Challenge eine
      "Du bist dran!"-Push ankommen statt der generischen Meldung.
-   - Automatische Challenges: Party starten (Modi → Abend starten), im
-     Event-Bildschirm den "🔔 Automatische Challenges"-Schalter
-     aktivieren, Intervall wählen. Die erste Push-Challenge kommt beim
-     nächsten Scheduler-Tick (max. 1 Minute, danach im gewählten
+   - Automatische Challenges (Party-Modus): Party starten (Modi → Abend
+     starten), im Event-Bildschirm den "🔔 Automatische Challenges"-
+     Schalter aktivieren, Intervall wählen. Die erste Push-Challenge kommt
+     beim nächsten Scheduler-Tick (max. 1 Minute, danach im gewählten
      Intervall). Fehlt eine Notification, `supabase functions logs
      party-push-tick` prüfen.
+   - Automatische Challenges (Kollegen-Modus): Dashboard → "💼 Kollegen-
+     Modus" → Team erstellen/beitreten → öffnet automatisch den Feed. Läuft
+     `coworker-push-tick` per Cron UND ist gerade Arbeitszeit (Mo-Fr,
+     09:00-12:30 oder 14:00-17:00, Europe/Berlin), kommt die erste
+     Challenge beim nächsten Tick (max. 1 Minute). Außerhalb der
+     Arbeitszeit passiert bewusst nichts – zum schnellen Testen notfalls
+     kurz `next_coworker_push_time()`/die Arbeitszeitfenster in
+     `supabase/schema.sql` anpassen oder einfach während der echten
+     Arbeitszeit testen. Fehlt eine Notification trotz laufendem Cron,
+     `supabase functions logs coworker-push-tick` prüfen. Wer zuerst im
+     Feed auf eine offene Challenge tippt, bekommt sie zugewiesen – ein
+     zweiter Tipp auf dieselbe Challenge (z.B. zweites Testgerät) muss mit
+     "Zu spät" abgelehnt werden.
 
 Auch dieser Teil konnte aus derselben netzwerklosen Umgebung heraus nicht
 live gegen einen echten Push-Dienst getestet werden – Edge-Function-Code

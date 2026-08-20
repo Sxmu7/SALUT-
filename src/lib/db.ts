@@ -273,6 +273,9 @@ export function createEvent(input: {
   const event: GameEvent = {
     id: uid("evt"),
     groupId: input.groupId,
+    // Kollegen-Modus ("Nur mit Supabase") existiert im lokalen Demo-Modus
+    // nicht – hier bewusst immer null, siehe Kommentar bei GameEvent.
+    coworkerGroupId: null,
     title: input.title,
     type: input.type,
     emoji: input.emoji,
@@ -287,6 +290,7 @@ export function createEvent(input: {
     challengeAssignments: {},
     targetChallengeCount: null,
     endedAt: null,
+    coworkerNextPushAt: null,
   };
   writeLS(LS_KEYS.events, [...all, event]);
   return event;
@@ -303,7 +307,10 @@ export function setTurnMode(eventId: string, enabled: boolean): GameEvent | unde
   const idx = all.findIndex((e) => e.id === eventId);
   if (idx === -1) return undefined;
   const event = all[idx];
-  const turnOrder = event.turnOrder.length > 0 ? event.turnOrder : listGroupMembers(event.groupId).map((m) => m.id);
+  // "as string": lokaler Demo-Modus kennt den Kollegen-Modus nicht (siehe
+  // GameEvent.groupId-Kommentar) – hier immer eine echte Trinkspiel-Gruppe.
+  const turnOrder =
+    event.turnOrder.length > 0 ? event.turnOrder : listGroupMembers(event.groupId as string).map((m) => m.id);
   all[idx] = { ...event, turnModeEnabled: enabled, turnOrder, turnIndex: event.turnIndex };
   saveAllEvents(all);
   return all[idx];
@@ -597,7 +604,8 @@ function simulateBotVotes(submissionId: string) {
     return s ? getEvent(s.eventId) : undefined;
   })();
   if (!event) return;
-  const members = listGroupMembers(event.groupId);
+  // "as string": siehe Kommentar bei setTurnMode() weiter oben.
+  const members = listGroupMembers(event.groupId as string);
   const bots = members.filter((m) => m.id.startsWith("bot_"));
   bots.forEach((bot, i) => {
     setTimeout(() => {
@@ -616,7 +624,8 @@ export function castVote(submissionId: string, voterId: string, approve: boolean
   votes.push({ voterId, approve, createdAt: new Date().toISOString() });
 
   const event = getEvent(sub.eventId);
-  const totalVoters = event ? listGroupMembers(event.groupId).length - 1 : votes.length;
+  // "as string": siehe Kommentar bei setTurnMode() weiter oben.
+  const totalVoters = event ? listGroupMembers(event.groupId as string).length - 1 : votes.length;
   const approvals = votes.filter((v) => v.approve).length;
   const rejections = votes.filter((v) => !v.approve).length;
   const quorum = Math.max(1, Math.ceil(totalVoters / 2));

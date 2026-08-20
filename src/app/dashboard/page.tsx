@@ -233,6 +233,26 @@ export default function DashboardPage() {
           </Button>
         )}
 
+        {/* Eigener, komplett getrennter Einstieg in den Kollegen-Modus
+            (alkoholfreie Arbeitsalltag-Challenges, siehe /coworker) – bewusst
+            immer sichtbar, nicht nur wenn kein Abend läuft, da beide Modi
+            unabhängig voneinander laufen können. */}
+        <Link href="/coworker">
+          <motion.div
+            whileTap={{ scale: 0.98 }}
+            className="rounded-2xl py-3.5 px-4 flex items-center gap-3 card-surface"
+          >
+            <span className="w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0" style={{ background: "linear-gradient(135deg, #ff2d55 0%, #de002e 100%)" }}>
+              💼
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm">Kollegen-Modus</p>
+              <p className="text-muted text-xs">Alkoholfreie Challenges mit deinem Team</p>
+            </div>
+            <span className="text-muted">→</span>
+          </motion.div>
+        </Link>
+
         <Card initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-display font-bold text-lg">Top 3</h2>

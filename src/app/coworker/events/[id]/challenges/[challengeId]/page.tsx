@@ -8,20 +8,17 @@ import { TopBar } from "@/components/layout/TopBar";
 import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
 import { fireConfetti } from "@/components/ui/Confetti";
-import { getCategory } from "@/lib/data/categories";
 import { TopBarSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { useProfile } from "@/hooks/useProfile";
-import { useEventChallenge } from "@/hooks/useEvent";
+import { useCoworkerEventChallenge } from "@/hooks/useCoworkerEvent";
 import {
   submitChallengeProof,
   declineChallenge,
-  listSubmissionsForUser,
-  listGroupMembers,
-  isRemoteMode,
+  listCoworkerGroupMembers,
 } from "@/lib/data-layer";
 import { Profile } from "@/types";
 
-export default function ChallengePlayPage({
+export default function CoworkerChallengePlayPage({
   params,
 }: {
   params: Promise<{ id: string; challengeId: string }>;
@@ -29,12 +26,11 @@ export default function ChallengePlayPage({
   const { id, challengeId } = usePromise(params);
   const router = useRouter();
   const { profile } = useProfile();
-  const { event, challenge, submission, setSubmission } = useEventChallenge(
+  const { event, challenge, submission, setSubmission } = useCoworkerEventChallenge(
     id,
     challengeId,
     profile?.id
   );
-  const category = challenge ? getCategory(challenge.categoryId) : null;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -45,33 +41,14 @@ export default function ChallengePlayPage({
   const [members, setMembers] = useState<Profile[]>([]);
   const celebratedRef = useRef(false);
 
-  // Im Supabase-Modus übernimmt useEventChallenge das per Realtime-
-  // Subscription (siehe hooks/useEvent.ts) – hier pollen wir nur noch im
-  // lokalen Demo-Modus, wo es kein Realtime gibt.
   useEffect(() => {
-    if (isRemoteMode()) return;
-    if (!submission || submission.status !== "pending" || !profile) return;
-    const interval = setInterval(async () => {
-      const updated = (await listSubmissionsForUser(id, profile.id)).find(
-        (s) => s.id === submission.id
-      );
-      if (updated && updated.status !== submission.status) {
-        setSubmission(updated);
-      }
-    }, 800);
-    return () => clearInterval(interval);
-  }, [submission, id, profile, setSubmission]);
-
-  useEffect(() => {
-    // groupId ist nur bei Trinkspiel-Events gesetzt – diese Seite ist nie
-    // für Kollegen-Events zuständig (eigene Route unter /coworker).
-    if (!event || !event.groupId) {
+    if (!event?.coworkerGroupId) {
       setMembers([]);
       return;
     }
     let cancelled = false;
     (async () => {
-      const all = await listGroupMembers(event.groupId as string);
+      const all = await listCoworkerGroupMembers(event.coworkerGroupId as string);
       if (!cancelled) setMembers(all.filter((m) => m.id !== profile?.id));
     })();
     return () => {
@@ -105,25 +82,23 @@ export default function ChallengePlayPage({
     );
   }
 
-  // Reihum-Modus: diese Challenge wurde beim Würfeln einer bestimmten
-  // Person zugewiesen (siehe DiceRoller.tsx/addChallengeToEvent) – alle
-  // anderen dürfen sie weder einreichen noch ablehnen, nur ansehen.
-  const assignedUserId = event.turnModeEnabled
-    ? event.challengeAssignments[challengeId]
-    : undefined;
-  const isBlockedByTurn = Boolean(assignedUserId) && assignedUserId !== profile?.id;
+  // Nur wer die Challenge angenommen ("geclaimt") hat, darf sie einreichen/
+  // ablehnen – alle anderen sehen nur, wer dran ist (Annehmen passiert in
+  // der Feed-Übersicht, siehe /coworker/events/[id]).
+  const assignedUserId = event.challengeAssignments[challengeId];
+  const isBlocked = Boolean(assignedUserId) && assignedUserId !== profile?.id;
   const assignedMember = assignedUserId ? members.find((m) => m.id === assignedUserId) : undefined;
 
-  if (isBlockedByTurn && !submission) {
+  if (isBlocked && !submission) {
     return (
       <AppShell>
-        <TopBar title={challenge.title} subtitle={category?.name} />
+        <TopBar title={challenge.title} />
         <div className="px-5">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="rounded-[28px] p-8 flex flex-col items-center text-center mb-5"
-            style={{ background: category?.gradient }}
+            style={{ background: "var(--gradient-accent)" }}
           >
             <span className="text-5xl mb-3">{challenge.icon}</span>
             <p className="text-white/90 text-sm leading-relaxed">{challenge.description}</p>
@@ -132,11 +107,11 @@ export default function ChallengePlayPage({
           <div className="card-surface rounded-2xl p-5 flex flex-col items-center text-center gap-3">
             {assignedMember && <Avatar emoji={assignedMember.avatarEmoji} size="lg" />}
             <p className="font-semibold text-sm">
-              🔄 {assignedMember?.name ?? "Jemand anderes"} ist dran
+              💼 {assignedMember?.name ?? "Jemand anderes"} hat diese Challenge angenommen
             </p>
             <p className="text-muted text-xs">
-              Im Reihum-Modus macht immer nur eine Person die aufgedeckte Challenge. Sobald{" "}
-              {assignedMember?.name ?? "diese Person"} fertig ist, geht&apos;s für alle weiter.
+              Wer zuerst annimmt, muss sie machen – bei der nächsten Challenge
+              bist du vielleicht schneller.
             </p>
           </div>
 
@@ -144,9 +119,9 @@ export default function ChallengePlayPage({
             fullWidth
             variant="secondary"
             className="mt-4"
-            onClick={() => router.push(`/events/${id}`)}
+            onClick={() => router.push(`/coworker/events/${id}`)}
           >
-            Zurück zum Event
+            Zurück zum Feed
           </Button>
         </div>
       </AppShell>
@@ -207,11 +182,6 @@ export default function ChallengePlayPage({
     }
   }
 
-  // "Nacheinreichung": nach einer Ablehnung (durch die Gruppe oder durch
-  // dich selbst) zurück zur Eingabe-Ansicht, damit ein neuer Versuch
-  // möglich ist. Es gibt bewusst keine Unique-Constraint auf
-  // (event_id, challenge_id, user_id) – submit() legt dann einfach eine
-  // neue Submission an, die "alte" abgelehnte bleibt als Historie stehen.
   function retry() {
     setSubmission(null);
     setPreview(null);
@@ -222,7 +192,7 @@ export default function ChallengePlayPage({
 
   return (
     <AppShell>
-      <TopBar title={challenge.title} subtitle={category?.name} />
+      <TopBar title={challenge.title} subtitle="Kollegen-Modus" />
 
       <div className="px-5">
         <motion.div
@@ -230,7 +200,7 @@ export default function ChallengePlayPage({
           animate={{ opacity: 1, scale: 1, rotate: 0 }}
           transition={{ type: "spring", stiffness: 200, damping: 16 }}
           className="rounded-[28px] p-8 flex flex-col items-center text-center mb-5"
-          style={{ background: category?.gradient }}
+          style={{ background: "var(--gradient-accent)" }}
         >
           <span className="text-5xl mb-3">{challenge.icon}</span>
           <p className="text-white/90 text-sm leading-relaxed">{challenge.description}</p>
@@ -341,7 +311,7 @@ export default function ChallengePlayPage({
                     >
                       🗳️
                     </motion.span>
-                    <p className="font-semibold text-sm">Lokale Abstimmung läuft…</p>
+                    <p className="font-semibold text-sm">Abstimmung im Team läuft…</p>
                   </div>
                   <div className="space-y-2">
                     {members.map((m) => {
@@ -351,16 +321,10 @@ export default function ChallengePlayPage({
                           <Avatar emoji={m.avatarEmoji} size="sm" />
                           <span className="text-sm flex-1">{m.name}</span>
                           {!vote && (
-                            <span className="text-muted text-xs animate-pulse">
-                              wartet…
-                            </span>
+                            <span className="text-muted text-xs animate-pulse">wartet…</span>
                           )}
                           {vote && (
-                            <motion.span
-                              initial={{ scale: 0 }}
-                              animate={{ scale: 1 }}
-                              className="text-lg"
-                            >
+                            <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} className="text-lg">
                               {vote.approve ? "✅" : "❌"}
                             </motion.span>
                           )}
@@ -381,7 +345,7 @@ export default function ChallengePlayPage({
                 >
                   <span className="text-4xl">🎉</span>
                   <p className="font-display font-extrabold text-xl mt-2 text-white">
-                    Challenge bestanden!
+                    Challenge gemeistert!
                   </p>
                   <p className="text-white/90 mt-1">+{submission.pointsAwarded} Punkte</p>
                 </motion.div>
@@ -393,24 +357,28 @@ export default function ChallengePlayPage({
                   <p className="font-semibold mt-2">
                     {submission.note === "declined_by_user"
                       ? "Von dir abgelehnt"
-                      : "Von der Gruppe abgelehnt"}
+                      : "Vom Team abgelehnt"}
                   </p>
                   <p className="text-muted text-sm mt-1">
                     {submission.note === "declined_by_user"
                       ? "Kein Problem – du kannst es dir aber auch nochmal überlegen."
-                      : "Kein Problem, du kannst es nochmal versuchen oder weiterziehen."}
+                      : "Kein Problem, die nächste Challenge kommt automatisch."}
                   </p>
                 </div>
               )}
 
-              {submission.status === "rejected" && (
+              {submission.status === "rejected" && submission.note === "declined_by_user" && (
                 <Button fullWidth size="lg" onClick={retry}>
                   Nochmal versuchen 🔁
                 </Button>
               )}
 
-              <Button fullWidth variant="secondary" onClick={() => router.push(`/events/${id}`)}>
-                Zurück zum Event
+              <Button
+                fullWidth
+                variant="secondary"
+                onClick={() => router.push(`/coworker/events/${id}`)}
+              >
+                Zurück zum Feed
               </Button>
             </motion.div>
           )}

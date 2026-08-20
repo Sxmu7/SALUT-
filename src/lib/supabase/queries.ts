@@ -28,6 +28,8 @@ import {
   BingoPlayerProgress,
   BingoSnapshot,
   BingoWinCondition,
+  CoworkerGroup,
+  CoworkerChallenge,
 } from "@/types";
 import { CHALLENGES } from "@/lib/data/challenges";
 import { isTodayBirthday, parseLocalDate, uid } from "@/lib/utils";
@@ -124,7 +126,8 @@ async function mapEventRow(row: Record<string, unknown>): Promise<GameEvent> {
   }
   return {
     id: row.id as string,
-    groupId: row.group_id as string,
+    groupId: (row.group_id as string | null) ?? null,
+    coworkerGroupId: (row.coworker_group_id as string | null) ?? null,
     title: row.title as string,
     type: row.type as GameEvent["type"],
     emoji: row.emoji as string,
@@ -139,6 +142,33 @@ async function mapEventRow(row: Record<string, unknown>): Promise<GameEvent> {
     challengeAssignments,
     targetChallengeCount: (row.target_challenge_count as number | null) ?? null,
     endedAt: (row.ended_at as string | null) ?? null,
+    coworkerNextPushAt: (row.coworker_next_push_at as string | null) ?? null,
+  };
+}
+
+function mapCoworkerGroupRow(row: Record<string, unknown>): CoworkerGroup {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    emoji: row.emoji as string,
+    inviteCode: row.invite_code as string,
+    ownerId: row.owner_id as string,
+    createdAt: row.created_at as string,
+  };
+}
+
+function mapCoworkerChallengeRow(row: Record<string, unknown>): CoworkerChallenge {
+  return {
+    id: row.id as string,
+    title: row.title as string,
+    description: row.description as string,
+    points: row.points as number,
+    difficulty: row.difficulty as CoworkerChallenge["difficulty"],
+    proofType: row.proof_type as CoworkerChallenge["proofType"],
+    icon: row.icon as string,
+    animation: row.animation as CoworkerChallenge["animation"],
+    isCustom: Boolean(row.is_custom),
+    source: row.source as CoworkerChallenge["source"],
   };
 }
 
@@ -364,6 +394,205 @@ export function subscribeToGroups(onChange: () => void): () => void {
     .channel(`groups-sync-${uid()}`)
     .on("postgres_changes", { event: "*", schema: "public", table: "group_members" }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "groups" }, onChange)
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+// ---------------------------- Kollegen-Gruppen (Co-Worker-Modus) ----------------------------
+// 1:1 dieselben Muster wie bei den Trinkspiel-Gruppen oben, nur auf
+// coworker_groups/coworker_group_members statt groups/group_members – nur
+// im Supabase-Modus verfügbar (siehe requireRemoteMode() in data-layer.ts),
+// deshalb gibt es hier bewusst kein lokales Pendant in lib/db.ts.
+
+export async function listCoworkerGroups(): Promise<CoworkerGroup[]> {
+  const supabase = getSupabaseClient();
+  const userId = await ensureSupabaseUser();
+  const { data, error } = await supabase
+    .from("coworker_group_members")
+    .select("coworker_groups(id, name, emoji, invite_code, owner_id, created_at)")
+    .eq("user_id", userId);
+  if (error) raise(error);
+  if (!data) return [];
+  const rows = data
+    .map((row: { coworker_groups: Record<string, unknown> | null }) => row.coworker_groups)
+    .filter((g: Record<string, unknown> | null): g is Record<string, unknown> => Boolean(g));
+  return rows.map(mapCoworkerGroupRow);
+}
+
+export async function createCoworkerGroup(name: string, emoji: string): Promise<CoworkerGroup> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { data, error } = await supabase.rpc("create_coworker_group", {
+    p_name: name,
+    p_emoji: emoji,
+  });
+  if (error) raise(error);
+  return mapCoworkerGroupRow(data as Record<string, unknown>);
+}
+
+export async function joinCoworkerGroupByCode(code: string): Promise<CoworkerGroup | null> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { data, error } = await supabase.rpc("join_coworker_group_by_code", {
+    p_invite_code: code.trim(),
+  });
+  if (error || !data) return null;
+  return mapCoworkerGroupRow(data as Record<string, unknown>);
+}
+
+export async function listCoworkerGroupMembers(groupId: string): Promise<Profile[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("coworker_group_members")
+    .select("profiles(*)")
+    .eq("group_id", groupId);
+  if (error || !data) return [];
+  return data
+    .map((row: { profiles: Record<string, unknown> | null }) => row.profiles)
+    .filter((p: Record<string, unknown> | null): p is Record<string, unknown> => Boolean(p))
+    .map(mapProfileRow);
+}
+
+export async function leaveCoworkerGroup(groupId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { error } = await supabase.rpc("leave_coworker_group", { p_group_id: groupId });
+  if (error) raise(error);
+}
+
+export async function kickCoworkerGroupMember(groupId: string, userId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { error } = await supabase.rpc("kick_coworker_group_member", {
+    p_group_id: groupId,
+    p_user_id: userId,
+  });
+  if (error) raise(error);
+}
+
+export async function deleteCoworkerGroup(groupId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { error } = await supabase.rpc("delete_coworker_group", { p_group_id: groupId });
+  if (error) raise(error);
+}
+
+/** Live-Updates für Kollegen-Gruppen/Mitgliedschaften – siehe
+ * subscribeToGroups() oben für die ausführliche Erklärung des
+ * eindeutigen Topic-Namens. */
+export function subscribeToCoworkerGroups(onChange: () => void): () => void {
+  const supabase = getSupabaseClient();
+  const channel = supabase
+    .channel(`coworker-groups-sync-${uid()}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "coworker_group_members" },
+      onChange
+    )
+    .on("postgres_changes", { event: "*", schema: "public", table: "coworker_groups" }, onChange)
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+// ---------------------------- Kollegen-Challenges (Co-Worker-Modus) ----------------------------
+
+export async function listCoworkerChallenges(): Promise<CoworkerChallenge[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("coworker_challenges").select("*");
+  if (error || !data) return [];
+  return data.map(mapCoworkerChallengeRow);
+}
+
+export async function getAnyCoworkerChallenge(id: string): Promise<CoworkerChallenge | undefined> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("coworker_challenges")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) return undefined;
+  return mapCoworkerChallengeRow(data);
+}
+
+// ---------------------------- Kollegen-Events (Co-Worker-Modus) ----------------------------
+// Der 5-Minuten-Push-Rhythmus selbst läuft komplett serverseitig (pg_cron +
+// Edge Function coworker-push-tick, siehe schema.sql) – hier nur das
+// Erstellen/Laden des Events + das Annehmen ("claimen") einer Challenge.
+
+export async function listCoworkerEvents(coworkerGroupId: string): Promise<GameEvent[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("events")
+    .select("*")
+    .eq("coworker_group_id", coworkerGroupId)
+    .order("event_date", { ascending: true });
+  if (error || !data) return [];
+  return Promise.all(data.map(mapEventRow));
+}
+
+/** Analog zu getOrCreateQuickEvent() im Trinkspiel-Pfad: pro Kollegen-Gruppe
+ * gibt es effektiv einen dauerhaften "Feed" statt einzelner Abende – ein
+ * bereits laufendes (nicht beendetes) Event wird wiederverwendet, sonst
+ * wird eins direkt mit status "live" angelegt (kein "upcoming"-Zwischen-
+ * schritt, der Kollegen-Modus ist immer sofort aktiv). coworker_next_push_at
+ * bleibt beim Insert absichtlich null – claim_due_coworker_pushes() (siehe
+ * schema.sql) behandelt null wie "sofort fällig" und plant beim ersten
+ * Scheduler-Tick den nächsten gültigen Arbeitszeit-Slot selbst ein. */
+export async function getOrCreateCoworkerEvent(coworkerGroupId: string): Promise<GameEvent> {
+  const existing = await listCoworkerEvents(coworkerGroupId);
+  const live = existing.find((e) => e.status !== "finished");
+  if (live) return live;
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("events")
+    .insert({
+      coworker_group_id: coworkerGroupId,
+      title: "Arbeitstag",
+      type: "coworker",
+      emoji: "💼",
+      event_date: new Date().toISOString(),
+      status: "live",
+    })
+    .select()
+    .single();
+  if (error) raise(error);
+  return mapEventRow(data);
+}
+
+/** Nutzt die claim_coworker_challenge()-RPC (siehe schema.sql) – "wer
+ * zuerst tippt, kriegt sie": atomares UPDATE ... WHERE assigned_user_id IS
+ * NULL auf Server-Seite, damit bei zwei fast gleichzeitigen Tippern nur
+ * genau eine Person gewinnt. Wirft bei bereits vergebenen/nicht
+ * existierenden Challenges (siehe already_claimed_or_not_found in
+ * schema.sql) – die UI sollte das abfangen und "schon vergeben" anzeigen. */
+export async function claimCoworkerChallenge(eventId: string, challengeId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  await ensureSupabaseUser();
+  const { error } = await supabase.rpc("claim_coworker_challenge", {
+    p_event_id: eventId,
+    p_challenge_id: challengeId,
+  });
+  if (error) raise(error);
+}
+
+/** Live-Updates für den Kollegen-Feed eines Events: neue automatisch
+ * verschickte Challenges (event_challenges INSERT) + wer welche Challenge
+ * geclaimt hat (event_challenges UPDATE) – siehe Realtime-Publikation in
+ * schema.sql. */
+export function subscribeToEventChallenges(eventId: string, onChange: () => void): () => void {
+  const supabase = getSupabaseClient();
+  const channel = supabase
+    .channel(`event-challenges-${eventId}-${uid()}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "event_challenges", filter: `event_id=eq.${eventId}` },
+      onChange
+    )
     .subscribe();
   return () => {
     supabase.removeChannel(channel);
@@ -676,7 +905,16 @@ export async function submitChallengeProof(input: {
   note?: string;
 }): Promise<Submission> {
   const supabase = getSupabaseClient();
-  const challenge = await getAnyChallenge(input.challengeId);
+  // Kollegen-Events (type "coworker") haben ihren Challenge-Katalog in der
+  // komplett getrennten Tabelle coworker_challenges statt challenges – ohne
+  // diese Weiche würde getAnyChallenge() hier nichts finden und proofType/
+  // points fälschlich auf "none"/0 zurückfallen (siehe getAnyCoworkerChallenge
+  // unten).
+  const event = await getEvent(input.eventId);
+  const challenge =
+    event?.type === "coworker"
+      ? await getAnyCoworkerChallenge(input.challengeId)
+      : await getAnyChallenge(input.challengeId);
 
   // Beweise landen im Supabase-Storage-Bucket "proofs" statt als Base64 in
   // der Datenbank – das ist auch der Grund, warum der lokale Demo-Modus an
