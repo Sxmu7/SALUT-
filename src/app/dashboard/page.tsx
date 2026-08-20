@@ -220,38 +220,114 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {!highlight?.eventId && (
-          <Button
-            fullWidth
-            size="lg"
-            onClick={async () => {
-              const event = await getOrCreateQuickEvent(group.id);
-              router.push(`/events/${event.id}`);
-            }}
-          >
-            Abend starten 🎲
-          </Button>
-        )}
+        {/* Moduswahl – früher ein eigener "Modi"-Tab (/challenges), jetzt
+            direkt auf Home: wer die App öffnet, soll ohne Umweg loslegen
+            können, statt erst noch in einen zweiten Tab wechseln zu müssen. */}
+        <div>
+          <h2 className="font-display font-bold text-lg mb-3">Modi</h2>
+          <div className="space-y-3">
+            {!highlight?.eventId && (
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-[28px] p-6 relative overflow-hidden"
+                style={{ background: "var(--gradient-party)" }}
+              >
+                <span className="text-4xl">🎲</span>
+                <h3 className="font-display font-extrabold text-xl text-white mt-2">
+                  Party-Modus
+                </h3>
+                <p className="text-white/85 text-[13px] mt-1 leading-relaxed max-w-[280px]">
+                  Keine Liste zum Durchblättern – jede Challenge kommt per
+                  Würfel. Überraschend, jedes Mal anders.
+                </p>
+                <Button
+                  fullWidth
+                  size="lg"
+                  variant="secondary"
+                  className="mt-4 bg-white/15 border-white/20"
+                  onClick={async () => {
+                    const event = await getOrCreateQuickEvent(group.id);
+                    router.push(`/events/${event.id}`);
+                  }}
+                >
+                  Abend starten 🥂
+                </Button>
+              </motion.div>
+            )}
 
-        {/* Eigener, komplett getrennter Einstieg in den Kollegen-Modus
-            (alkoholfreie Arbeitsalltag-Challenges, siehe /coworker) – bewusst
-            immer sichtbar, nicht nur wenn kein Abend läuft, da beide Modi
-            unabhängig voneinander laufen können. */}
-        <Link href="/coworker">
-          <motion.div
-            whileTap={{ scale: 0.98 }}
-            className="rounded-2xl py-3.5 px-4 flex items-center gap-3 card-surface"
-          >
-            <span className="w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0" style={{ background: "linear-gradient(135deg, #ff2d55 0%, #de002e 100%)" }}>
-              💼
-            </span>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm">Kollegen-Modus</p>
-              <p className="text-muted text-xs">Alkoholfreie Challenges mit deinem Team</p>
+            {/* Komplett getrennter zweiter Modus (alkoholfreie Arbeitsalltag-
+                Challenges, siehe /coworker) – eigene Marke/Farbe, damit auf
+                Anhieb klar ist "das ist nicht das Trinkspiel". /coworker
+                entscheidet selbst, ob es direkt in ein Team springt oder
+                erst zur Team-Auswahl führt. */}
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 }}
+              className="rounded-[28px] p-6 relative overflow-hidden"
+              style={{ background: "linear-gradient(135deg, #ff2d55 0%, #de002e 100%)" }}
+            >
+              <span className="text-4xl">💼</span>
+              <h3 className="font-display font-extrabold text-xl text-white mt-2">
+                Kollegen-Modus
+              </h3>
+              <p className="text-white/85 text-[13px] mt-1 leading-relaxed max-w-[280px]">
+                Alkoholfreie Challenges für den Arbeitsalltag – automatisch
+                alle 5 Minuten während der Arbeitszeit.
+              </p>
+              <Button
+                fullWidth
+                size="lg"
+                variant="secondary"
+                className="mt-4 bg-white/15 border-white/20"
+                onClick={() => router.push("/coworker")}
+              >
+                Loslegen 💼
+              </Button>
+            </motion.div>
+
+            <div className="grid grid-cols-2 gap-3 opacity-50 pointer-events-none">
+              <div className="card-surface rounded-2xl p-4">
+                <span className="text-2xl">🤖</span>
+                <p className="font-semibold text-sm mt-2">KI-Modus</p>
+                <p className="text-muted text-xs mt-0.5">
+                  Neue Challenges automatisch generiert.
+                </p>
+                <span className="inline-block mt-2 text-[10px] font-bold px-2 py-1 rounded-full bg-white/10">
+                  BALD
+                </span>
+              </div>
+              <div className="card-surface rounded-2xl p-4">
+                <span className="text-2xl">📋</span>
+                <p className="font-semibold text-sm mt-2">Klassisch-Modus</p>
+                <p className="text-muted text-xs mt-0.5">
+                  Feste Reihenfolge, kein Zufall.
+                </p>
+                <span className="inline-block mt-2 text-[10px] font-bold px-2 py-1 rounded-full bg-white/10">
+                  BALD
+                </span>
+              </div>
             </div>
-            <span className="text-muted">→</span>
-          </motion.div>
-        </Link>
+
+            <Link href="/challenges/new">
+              <motion.div
+                whileTap={{ scale: 0.98 }}
+                className="card-surface rounded-2xl p-3.5 flex items-center gap-3 border-dashed border-2 border-white/10"
+              >
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/10 text-lg">
+                  ➕
+                </div>
+                <div className="flex-1">
+                  <p className="font-semibold text-sm">Eigene Challenge beisteuern</p>
+                  <p className="text-muted text-xs">
+                    Landet im Würfel-Topf eurer Crew – manuell oder per Dokument
+                  </p>
+                </div>
+              </motion.div>
+            </Link>
+          </div>
+        </div>
 
         <Card initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
           <div className="flex items-center justify-between mb-3">

@@ -5,9 +5,12 @@ import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
+// "Modi" ist als eigener Tab entfallen – die Moduswahl (Party-/Kollegen-
+// Modus, künftige Modi) lebt jetzt direkt auf Home (siehe dashboard/page.tsx),
+// damit man nicht erst in einen separaten Tab wechseln muss, um überhaupt
+// loszuspielen. Ranking bleibt bewusst ein eigener Tab.
 const TABS = [
   { href: "/dashboard", label: "Home", icon: "🏠" },
-  { href: "/challenges", label: "Modi", icon: "🎲" },
   { href: "/ranking", label: "Ranking", icon: "🏆" },
   { href: "/groups", label: "Freunde", icon: "👥" },
   { href: "/profile", label: "Profil", icon: "⚙️" },

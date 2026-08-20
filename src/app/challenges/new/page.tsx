@@ -51,7 +51,7 @@ export default function NewChallengePage() {
     setSaveError(null);
     try {
       await addCustomChallenges([challenge]);
-      router.push("/challenges");
+      router.push("/dashboard");
     } catch (err) {
       // Ohne dieses catch passierte bei einem Supabase-Fehler einfach
       // nichts – kein Redirect, keine Fehlermeldung, der Button wirkte tot.
@@ -78,7 +78,7 @@ export default function NewChallengePage() {
     setSaveError(null);
     try {
       await addCustomChallenges(imported);
-      router.push("/challenges");
+      router.push("/dashboard");
     } catch (err) {
       setSaveError(
         err instanceof Error ? err.message : "Import fehlgeschlagen. Bitte erneut versuchen."
